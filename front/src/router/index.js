@@ -17,6 +17,33 @@ const router = createRouter({
       // which is lazy-loaded when the route is visited.
       component: () => import('../views/AboutView.vue'),
     },
+    {
+      path: '/auth',
+      name: 'auth',
+      component: () => import('../views/AuthView.vue'),
+    },
+    {
+      path: '/upload',
+      name: 'upload',
+      component: () => import('../views/UploadView.vue'),
+    },
+    {
+      path: '/gallery',
+      name: 'gallery',
+      component: () => import('../views/GalleryView.vue'),
+    },
+    {
+      path: '/image/:id',
+      name: 'image',
+      component: () => import('../views/ImageView.vue'),
+      props: true,
+    },
+    {
+      path: '/image/:id/edit',
+      name: 'image-edit',
+      component: () => import('../views/ImageEditView.vue'),
+      props: true,
+    },
   ],
 })
 
