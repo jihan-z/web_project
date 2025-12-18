@@ -1,480 +1,307 @@
 <template>
-  <div class="image-edit-container">
-    <el-page-header @back="goBack" content="编辑图片" />
-    
-    <div class="edit-content">
-      <div class="image-preview-section">
-        <div class="image-canvas-container">
-          <img 
-            ref="imageCanvas" 
-            :src="image.fullUrl" 
-            alt="待编辑图片"
-            crossorigin="anonymous"
-          >
+  <MainLayout>
+    <div class="edit-page">
+      <div class="top-bar">
+        <el-button @click="router.back()">
+          <el-icon><ArrowLeft /></el-icon>
+          返回
+        </el-button>
+
+        <div class="top-actions">
+          <el-button @click="router.push(`/image/${route.params.id}`)">查看信息</el-button>
         </div>
       </div>
-      
-      <div class="edit-controls">
-        <el-tabs v-model="activeTab" class="edit-tabs">
-          <el-tab-pane label="裁剪" name="crop">
-            <div class="control-group">
-              <h4>裁剪比例</h4>
-              <div class="aspect-ratio-buttons">
-                <el-button 
-                  v-for="ratio in aspectRatios" 
-                  :key="ratio.value"
-                  :type="currentAspectRatio === ratio.value ? 'primary' : 'default'"
-                  @click="setAspectRatio(ratio.value)"
-                >
-                  {{ ratio.label }}
-                </el-button>
+
+      <el-skeleton :loading="loading" animated>
+        <el-row v-if="image" :gutter="24">
+          <!-- 预览 -->
+          <el-col :span="16">
+            <el-card>
+              <div class="preview">
+                <img
+                  ref="previewRef"
+                  :src="previewUrl"
+                  :alt="image.original_filename"
+                  :style="{ filter: previewFilter }"
+                />
               </div>
-              <el-button @click="resetCrop">重置裁剪</el-button>
-            </div>
-          </el-tab-pane>
-          
-          <el-tab-pane label="滤镜" name="filter">
-            <div class="control-group">
-              <h4>预设滤镜</h4>
-              <div class="filter-presets">
-                <div 
-                  v-for="filter in filters" 
-                  :key="filter.name"
-                  class="filter-preset"
-                  :class="{ active: currentFilter === filter.name }"
-                  @click="applyFilter(filter.name)"
-                >
-                  <div 
-                    class="filter-preview" 
-                    :style="{ filter: filter.value }"
-                  >
-                    <img :src="image.thumbnailUrl" alt="滤镜预览">
-                  </div>
-                  <span>{{ filter.name }}</span>
+              <div class="hint">
+                说明：右侧调整仅做预览；点击“应用调整/应用裁剪”后会调用后端接口并覆盖原图与缩略图。
+              </div>
+            </el-card>
+          </el-col>
+
+          <!-- 编辑面板 -->
+          <el-col :span="8">
+            <el-card>
+              <template #header>
+                <div class="panel-header">
+                  <span>编辑图片</span>
+                  <span class="file-name">{{ image.original_filename }}</span>
                 </div>
-              </div>
-            </div>
-          </el-tab-pane>
-          
-          <el-tab-pane label="调整" name="adjust">
-            <div class="control-group">
-              <div class="adjustment-control">
-                <label>亮度</label>
-                <el-slider 
-                  v-model="adjustments.brightness" 
-                  :min="0" 
-                  :max="200" 
-                  :step="1"
-                  @change="applyAdjustments"
-                />
-                <span>{{ adjustments.brightness }}%</span>
-              </div>
-              
-              <div class="adjustment-control">
-                <label>对比度</label>
-                <el-slider 
-                  v-model="adjustments.contrast" 
-                  :min="0" 
-                  :max="200" 
-                  :step="1"
-                  @change="applyAdjustments"
-                />
-                <span>{{ adjustments.contrast }}%</span>
-              </div>
-              
-              <div class="adjustment-control">
-                <label>饱和度</label>
-                <el-slider 
-                  v-model="adjustments.saturation" 
-                  :min="0" 
-                  :max="200" 
-                  :step="1"
-                  @change="applyAdjustments"
-                />
-                <span>{{ adjustments.saturation }}%</span>
-              </div>
-              
-              <el-button @click="resetAdjustments">重置调整</el-button>
-            </div>
-          </el-tab-pane>
-        </el-tabs>
-        
-        <div class="action-buttons">
-          <el-button @click="cancelEdit">取消</el-button>
-          <el-button type="primary" @click="saveChanges">保存更改</el-button>
-        </div>
-      </div>
+              </template>
+
+              <el-tabs v-model="activeTab" class="edit-tabs">
+                <el-tab-pane label="裁剪" name="crop">
+                  <div class="crop-area">
+                    <CropperTool
+                      v-if="cropImageUrl"
+                      :image-url="cropImageUrl"
+                      @crop-confirm="onCropConfirm"
+                    />
+                  </div>
+
+                  <el-button
+                    type="primary"
+                    style="width: 100%"
+                    :loading="cropping"
+                    :disabled="!pendingCrop"
+                    @click="applyCrop"
+                  >
+                    应用裁剪
+                  </el-button>
+                </el-tab-pane>
+
+                <el-tab-pane label="色调" name="adjust">
+                  <el-form label-width="90px">
+                    <el-form-item label="亮度">
+                      <el-slider v-model="adjustments.brightness" :min="-50" :max="50" :step="1" />
+                      <span class="slider-value">{{ adjustments.brightness }}</span>
+                    </el-form-item>
+
+                    <el-form-item label="饱和度">
+                      <el-slider v-model="adjustments.saturation" :min="-50" :max="50" :step="1" />
+                      <span class="slider-value">{{ adjustments.saturation }}</span>
+                    </el-form-item>
+
+                    <el-form-item label="对比度">
+                      <el-slider v-model="adjustments.contrast" :min="-50" :max="50" :step="1" />
+                      <span class="slider-value">{{ adjustments.contrast }}</span>
+                    </el-form-item>
+                  </el-form>
+
+                  <div class="adjust-actions">
+                    <el-button @click="resetAdjustments">重置</el-button>
+                    <el-button
+                      type="primary"
+                      :loading="adjusting"
+                      @click="applyAdjust"
+                    >
+                      应用调整
+                    </el-button>
+                  </div>
+                </el-tab-pane>
+              </el-tabs>
+            </el-card>
+          </el-col>
+        </el-row>
+      </el-skeleton>
     </div>
-  </div>
+  </MainLayout>
 </template>
 
-<script>
-import { ref, reactive, onMounted, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import Cropper from 'cropperjs'
-import 'cropperjs/dist/cropper.css'
-import { ElMessage } from 'element-plus'
-import api from '@/utils/api'
+<script setup>
+import { ref, reactive, computed, onMounted, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { ElMessage } from 'element-plus';
+import MainLayout from '@/components/MainLayout.vue';
+import CropperTool from '@/components/CropperTool.vue';
+import { useImagesStore } from '@/stores/images';
 
-export default {
-  name: 'ImageEditView',
-  setup() {
-    const router = useRouter()
-    const route = useRoute()
-    
-    // 数据状态
-    const image = ref({
-      id: route.params.id,
-      title: '',
-      fullUrl: '',
-      thumbnailUrl: ''
-    })
-    
-    const activeTab = ref('crop')
-    const imageCanvas = ref(null)
-    const cropperInstance = ref(null)
-    
-    // 裁剪相关
-    const currentAspectRatio = ref(NaN)
-    const aspectRatios = ref([
-      { label: '自由', value: NaN },
-      { label: '1:1', value: 1 },
-      { label: '4:3', value: 4/3 },
-      { label: '16:9', value: 16/9 },
-      { label: '2:3', value: 2/3 }
-    ])
-    
-    // 滤镜相关
-    const currentFilter = ref('原始')
-    const filters = ref([
-      { name: '原始', value: 'none' },
-      { name: '黑白', value: 'grayscale(100%)' },
-      { name: '复古', value: 'sepia(100%)' },
-      { name: '高对比', value: 'contrast(150%)' },
-      { name: '亮色', value: 'brightness(120%)' },
-      { name: '暗色', value: 'brightness(80%)' }
-    ])
-    
-    // 调整相关
-    const adjustments = reactive({
-      brightness: 100,
-      contrast: 100,
-      saturation: 100
-    })
-    
-    // 返回上一页
-    const goBack = () => {
-      router.back()
-    }
-    
-    // 初始化裁剪器
-    const initCropper = () => {
-      if (cropperInstance.value) {
-        cropperInstance.value.destroy()
-      }
-      
-      cropperInstance.value = new Cropper(imageCanvas.value, {
-        aspectRatio: currentAspectRatio.value,
-        viewMode: 1,
-        autoCropArea: 0.8,
-        movable: true,
-        zoomable: true,
-        rotatable: true,
-        scalable: true
-      })
-    }
-    
-    // 设置裁剪比例
-    const setAspectRatio = (ratio) => {
-      currentAspectRatio.value = ratio
-      if (cropperInstance.value) {
-        cropperInstance.value.setAspectRatio(ratio)
-      }
-    }
-    
-    // 重置裁剪
-    const resetCrop = () => {
-      if (cropperInstance.value) {
-        cropperInstance.value.reset()
-      }
-    }
-    
-    // 应用滤镜
-    const applyFilter = (filterName) => {
-      currentFilter.value = filterName
-      const filter = filters.value.find(f => f.name === filterName)
-      if (filter && imageCanvas.value) {
-        imageCanvas.value.style.filter = filter.value
-      }
-    }
-    
-    // 应用调整
-    const applyAdjustments = () => {
-      if (imageCanvas.value) {
-        imageCanvas.value.style.filter = `
-          brightness(${adjustments.brightness}%)
-          contrast(${adjustments.contrast}%)
-          saturate(${adjustments.saturation}%)
-        `
-      }
-    }
-    
-    // 重置调整
-    const resetAdjustments = () => {
-      adjustments.brightness = 100
-      adjustments.contrast = 100
-      adjustments.saturation = 100
-      applyAdjustments()
-    }
-    
-    // 取消编辑
-    const cancelEdit = () => {
-      router.back()
-    }
-    
-    // 获取图片详情
-    const fetchImageDetails = async () => {
-      try {
-        const response = await api.get(`/images/${image.value.id}`)
-        const imageData = response.data.image
-        image.value.title = imageData.original_filename
-        image.value.fullUrl = `/uploads/${imageData.original_filename}`
-        // 构造缩略图URL
-        const thumbPath = imageData.thumb_path
-        if (thumbPath) {
-          const thumbName = thumbPath.split('/').pop()
-          image.value.thumbnailUrl = `/uploads/thumbnails/${thumbName}`
-        }
-      } catch (error) {
-        console.error('获取图片详情失败:', error)
-        ElMessage.error('获取图片详情失败: ' + (error.response?.data?.error || error.message))
-      }
-    }
-    
-    // 保存更改
-    const saveChanges = async () => {
-      try {
-        // 根据当前活动的标签页执行不同的保存操作
-        if (activeTab.value === 'crop' && cropperInstance.value) {
-          // 获取裁剪数据
-          const cropData = cropperInstance.value.getData()
-          
-          // 发送裁剪请求到后端
-          await api.post(`/images/${image.value.id}/crop`, {
-            x: cropData.x,
-            y: cropData.y,
-            width: cropData.width,
-            height: cropData.height
-          })
-          
-          ElMessage.success('图片裁剪保存成功')
-        } else if (activeTab.value === 'adjust') {
-          // 发送色调调整请求到后端
-          await api.post(`/images/${image.value.id}/adjust`, {
-            brightness: adjustments.brightness,
-            contrast: adjustments.contrast,
-            saturation: adjustments.saturation
-          })
-          
-          ElMessage.success('图片色调调整保存成功')
-        } else if (activeTab.value === 'filter') {
-          // 滤镜效果已在前端应用，需要发送到后端处理
-          // 这里可以根据实际需求实现
-          ElMessage.success('滤镜效果保存成功')
-        }
-        
-        // 重新加载图片详情页
-        router.push(`/image/${image.value.id}`)
-      } catch (error) {
-        console.error('保存失败:', error)
-        ElMessage.error('保存失败: ' + (error.response?.data?.error || error.message))
-      }
-    }
-    
-    // 监听标签页变化
-    watch(activeTab, (newTab) => {
-      if (newTab === 'crop') {
-        // 延迟初始化裁剪器，确保DOM已更新
-        setTimeout(() => {
-          initCropper()
-        }, 100)
-      } else {
-        // 销毁裁剪器
-        if (cropperInstance.value) {
-          cropperInstance.value.destroy()
-          cropperInstance.value = null
-        }
-      }
-    })
-    
-    // 组件挂载后初始化
-    onMounted(async () => {
-      // 获取图片详情
-      await fetchImageDetails()
-      
-      // 初始化裁剪器
-      setTimeout(() => {
-        initCropper()
-      }, 100)
-    })
-    
-    return {
-      image,
-      activeTab,
-      imageCanvas,
-      currentAspectRatio,
-      aspectRatios,
-      currentFilter,
-      filters,
-      adjustments,
-      goBack,
-      setAspectRatio,
-      resetCrop,
-      applyFilter,
-      applyAdjustments,
-      resetAdjustments,
-      cancelEdit,
-      saveChanges
-    }
+const route = useRoute();
+const router = useRouter();
+const imagesStore = useImagesStore();
+
+const loading = ref(false);
+const cropping = ref(false);
+const adjusting = ref(false);
+
+const image = ref(null);
+const previewRef = ref(null);
+
+const activeTab = ref('crop');
+
+const adjustments = reactive({
+  brightness: 0,
+  saturation: 0,
+  contrast: 0
+});
+
+const pendingCrop = ref(null); // { x, y, width, height }
+
+const cacheBustKey = computed(() => imagesStore.cacheBust?.[String(route.params.id)]);
+
+const getImageUrl = (path, imageId) => {
+  if (!path) return '';
+  const baseURL = import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || 'http://localhost:3000';
+  const base = `${baseURL}/${path}`;
+  const bust = imagesStore.cacheBust?.[String(imageId)];
+  if (!bust) return base;
+  return base.includes('?') ? `${base}&t=${bust}` : `${base}?t=${bust}`;
+};
+
+const previewUrl = computed(() => {
+  if (!image.value) return '';
+  return getImageUrl(image.value.stored_path, image.value.id);
+});
+
+const cropImageUrl = computed(() => {
+  if (!image.value) return '';
+  // 裁剪器使用同一张图，但也需要 cache bust
+  return getImageUrl(image.value.stored_path, image.value.id);
+});
+
+const previewFilter = computed(() => {
+  const b = 1 + (adjustments.brightness / 100);
+  const s = 1 + (adjustments.saturation / 100);
+  const c = 1 + (adjustments.contrast / 100);
+  return `brightness(${b}) saturate(${s}) contrast(${c})`;
+});
+
+const loadImage = async () => {
+  loading.value = true;
+  try {
+    const imageData = await imagesStore.fetchImageDetail(route.params.id);
+    image.value = imageData;
+  } catch (e) {
+    console.error(e);
+    ElMessage.error('加载图片失败');
+    router.back();
+  } finally {
+    loading.value = false;
   }
-}
+};
+
+const resetAdjustments = () => {
+  adjustments.brightness = 0;
+  adjustments.saturation = 0;
+  adjustments.contrast = 0;
+};
+
+const onCropConfirm = (_blob, _dataUrl, cropData) => {
+  // CropperTool 里 emit 的 cropData 来自 cropper.getData(true)
+  if (!cropData) {
+    pendingCrop.value = null;
+    return;
+  }
+  pendingCrop.value = {
+    x: cropData.x,
+    y: cropData.y,
+    width: cropData.width,
+    height: cropData.height
+  };
+};
+
+const applyCrop = async () => {
+  if (!pendingCrop.value) return;
+  cropping.value = true;
+  try {
+    await imagesStore.cropImage(route.params.id, pendingCrop.value);
+    imagesStore.bustImageCache(route.params.id);
+    pendingCrop.value = null;
+    ElMessage.success('裁剪成功');
+    await loadImage();
+  } catch (e) {
+    console.error(e);
+  } finally {
+    cropping.value = false;
+  }
+};
+
+const applyAdjust = async () => {
+  adjusting.value = true;
+  try {
+    await imagesStore.adjustImage(route.params.id, { ...adjustments });
+    imagesStore.bustImageCache(route.params.id);
+    ElMessage.success('调整成功');
+    await loadImage();
+  } catch (e) {
+    console.error(e);
+  } finally {
+    adjusting.value = false;
+  }
+};
+
+onMounted(loadImage);
+
+// 当 cache bust 更新时，强制刷新 <img>（有些浏览器对同 URL 的 filter+img 组合缓存较激进）
+watch(cacheBustKey, () => {
+  if (previewRef.value) {
+    previewRef.value.src = previewUrl.value;
+  }
+});
 </script>
 
 <style scoped>
-.image-edit-container {
-  padding: 20px;
-  height: calc(100vh - 40px);
+.edit-page {
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
-.edit-content {
+.top-bar {
   display: flex;
-  height: calc(100% - 60px);
-  margin-top: 20px;
-  gap: 30px;
-}
-
-.image-preview-section {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.image-canvas-container {
-  flex: 1;
-  display: flex;
-  justify-content: center;
+  justify-content: space-between;
   align-items: center;
-  background-color: #f5f5f5;
+  margin-bottom: 16px;
+}
+
+.preview {
+  background: #000;
   border-radius: 8px;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 460px;
 }
 
-.image-canvas-container img {
+.preview img {
   max-width: 100%;
-  max-height: 100%;
+  max-height: 700px;
   display: block;
 }
 
-.edit-controls {
-  width: 350px;
-  flex-shrink: 0;
+.hint {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #999;
+  line-height: 1.4;
+}
+
+.panel-header {
   display: flex;
-  flex-direction: column;
-}
-
-.edit-tabs {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.edit-tabs :deep(.el-tabs__content) {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.control-group {
-  padding: 20px 0;
-}
-
-.control-group h4 {
-  margin: 0 0 15px 0;
-  color: #333;
-}
-
-.aspect-ratio-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 20px;
-}
-
-.aspect-ratio-buttons .el-button {
-  flex: 1;
-  min-width: 70px;
-}
-
-.filter-presets {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 15px;
-}
-
-.filter-preset {
-  text-align: center;
-  cursor: pointer;
-}
-
-.filter-preset.active .filter-preview {
-  border-color: #409eff;
-  box-shadow: 0 0 0 2px #409eff;
-}
-
-.filter-preview {
-  width: 100%;
-  height: 80px;
-  border: 2px solid #ebeef5;
-  border-radius: 4px;
-  overflow: hidden;
-  margin-bottom: 5px;
-}
-
-.filter-preview img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.adjustment-control {
-  display: flex;
+  justify-content: space-between;
+  gap: 12px;
   align-items: center;
-  margin-bottom: 20px;
 }
 
-.adjustment-control label {
-  width: 60px;
-  margin-right: 15px;
+.file-name {
+  font-size: 12px;
+  color: #909399;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
 }
 
-.adjustment-control .el-slider {
-  flex: 1;
-  margin-right: 15px;
+.crop-area {
+  height: 420px;
+  margin-bottom: 12px;
 }
 
-.adjustment-control span {
-  width: 50px;
-  text-align: right;
-}
-
-.action-buttons {
+.adjust-actions {
   display: flex;
-  gap: 15px;
-  padding: 20px 0;
-  border-top: 1px solid #ebeef5;
+  justify-content: space-between;
+  gap: 10px;
 }
 
-.action-buttons .el-button {
-  flex: 1;
+.slider-value {
+  display: inline-block;
+  width: 40px;
+  text-align: center;
+  margin-left: 10px;
+  color: #666;
 }
 </style>
+
+

@@ -7,6 +7,8 @@
 var app = require('../app');
 var debug = require('debug')('back:server');
 var http = require('http');
+var fs = require('fs');
+var path = require('path');
 
 /**
  * Get port from environment and store in Express.
@@ -14,6 +16,16 @@ var http = require('http');
 
 var port = normalizePort(process.env.PORT || '3000');
 app.set('port', port);
+
+/**
+ * Ensure uploads directory exists
+ */
+
+var uploadsDir = path.join(__dirname, '../uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('✅ Created uploads directory');
+}
 
 /**
  * Create HTTP server.
@@ -87,4 +99,6 @@ function onListening() {
     ? 'pipe ' + addr
     : 'port ' + addr.port;
   debug('Listening on ' + bind);
+  console.log('🚀 Server is running on http://localhost:' + addr.port);
+  console.log('📝 API documentation: http://localhost:' + addr.port + '/api/health');
 }

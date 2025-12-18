@@ -1,528 +1,641 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../config/db');
-const sharp = require('sharp');
-const fsp = require('fs').promises;
-const fs = require('fs');
 const path = require('path');
-const multer = require('multer');
-const exifr = require('exifr');
+const fs = require('fs');
+const db = require('../config/database');
+const { authenticateToken } = require('../middleware/auth');
+const upload = require('../middleware/upload');
+const { generateThumbnail, extractExifData, cropImage, adjustImage } = require('../utils/imageProcessor');
 
-// 确保上传目录存在
-const uploadDir = path.join(__dirname, '../public/uploads');
-const thumbDir = path.join(uploadDir, 'thumbnails');
-
-// 创建上传目录
-async function ensureDirs() {
-  try {
-    await fsp.access(uploadDir);
-  } catch {
-    await fsp.mkdir(uploadDir, { recursive: true });
-  }
+// 修复文件名编码（处理中文）
+const fixFilename = (filename) => {
+  if (!filename) return filename;
   
   try {
-    await fsp.access(thumbDir);
-  } catch {
-    await fsp.mkdir(thumbDir, { recursive: true });
+    // 如果文件名已经是乱码（latin1编码），尝试转换为UTF-8
+    // 检测是否包含乱码特征字符
+    if (/[\u00C0-\u00FF][\u0080-\u00BF]/.test(filename)) {
+      // 将错误编码的字符串转回 Buffer，然后用 UTF-8 解码
+      const buffer = Buffer.from(filename, 'latin1');
+      return buffer.toString('utf8');
+    }
+    return filename;
+  } catch (error) {
+    console.warn('Failed to fix filename encoding:', error);
+    return filename;
+  }
+};
+
+// 单图上传
+router.post('/upload', authenticateToken, upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const imagePath = req.file.path;
+    const thumbnailPath = imagePath.replace(/(\.[^.]+)$/, '_thumb$1');
+
+    // 生成缩略图
+    await generateThumbnail(imagePath, thumbnailPath);
+
+    // 提取 EXIF 信息
+    const exifData = await extractExifData(imagePath);
+
+    // 存储路径（相对路径）
+    const storedPath = path.relative(path.join(__dirname, '..'), imagePath);
+    const thumbPath = path.relative(path.join(__dirname, '..'), thumbnailPath);
+
+    // 修复文件名编码
+    const originalFilename = fixFilename(req.file.originalname);
+    
+    // 插入数据库
+    const [result] = await db.query(
+      `INSERT INTO images (user_id, original_filename, stored_path, thumbnail_path, 
+       width, height, taken_time, gps_latitude, gps_longitude, camera_model) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        req.user.id,
+        originalFilename,
+        storedPath,
+        thumbPath,
+        exifData.width,
+        exifData.height,
+        exifData.takenTime,
+        exifData.gpsLatitude,
+        exifData.gpsLongitude,
+        exifData.cameraModel
+      ]
+    );
+
+    const imageId = result.insertId;
+
+    // 创建自动标签
+    await createAutoTags(imageId, exifData);
+
+    // 获取完整图片信息
+    const [images] = await db.query(
+      `SELECT i.*, GROUP_CONCAT(t.name) as tags
+       FROM images i
+       LEFT JOIN image_tags it ON i.id = it.image_id
+       LEFT JOIN tags t ON it.tag_id = t.id
+       WHERE i.id = ?
+       GROUP BY i.id`,
+      [imageId]
+    );
+
+    res.status(201).json({
+      message: 'Image uploaded successfully',
+      image: images[0]
+    });
+  } catch (error) {
+    console.error('Upload error:', error);
+    res.status(500).json({ error: 'Failed to upload image' });
+  }
+});
+
+// 批量上传
+router.post('/upload/batch', authenticateToken, upload.array('images', 10), async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No files uploaded' });
+    }
+
+    const uploadedImages = [];
+
+    for (const file of req.files) {
+      try {
+        // 修复文件名编码
+        const originalFilename = fixFilename(file.originalname);
+        
+        const imagePath = file.path;
+        const thumbnailPath = imagePath.replace(/(\.[^.]+)$/, '_thumb$1');
+
+        // 生成缩略图（容错处理）
+        let thumbPath = null;
+        try {
+          await generateThumbnail(imagePath, thumbnailPath);
+          thumbPath = path.relative(path.join(__dirname, '..'), thumbnailPath);
+          console.log('✅ Thumbnail generated:', thumbnailPath);
+        } catch (thumbError) {
+          console.error('⚠️ Thumbnail generation failed:', thumbError.message);
+          // 缩略图生成失败时，使用原图作为缩略图
+          thumbPath = path.relative(path.join(__dirname, '..'), imagePath);
+        }
+        
+        // 提取 EXIF 信息（容错处理）
+        let exifData = {
+          width: null,
+          height: null,
+          takenTime: null,
+          gpsLatitude: null,
+          gpsLongitude: null,
+          cameraModel: null
+        };
+        try {
+          exifData = await extractExifData(imagePath);
+          console.log('✅ EXIF extracted for:', originalFilename);
+        } catch (exifError) {
+          console.error('⚠️ EXIF extraction failed:', exifError.message);
+        }
+
+        const storedPath = path.relative(path.join(__dirname, '..'), imagePath);
+
+        const [result] = await db.query(
+          `INSERT INTO images (user_id, original_filename, stored_path, thumbnail_path, 
+           width, height, taken_time, gps_latitude, gps_longitude, camera_model) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            req.user.id,
+            originalFilename,
+            storedPath,
+            thumbPath,
+            exifData.width,
+            exifData.height,
+            exifData.takenTime,
+            exifData.gpsLatitude,
+            exifData.gpsLongitude,
+            exifData.cameraModel
+          ]
+        );
+
+        const imageId = result.insertId;
+        console.log(`✅ Image saved to database, ID: ${imageId}`);
+        
+        // 创建自动标签（容错处理）
+        try {
+          await createAutoTags(imageId, exifData);
+          console.log(`✅ Auto tags created for image ${imageId}`);
+        } catch (tagError) {
+          console.error('⚠️ Auto tag creation failed:', tagError.message);
+        }
+
+        uploadedImages.push({ 
+          id: imageId, 
+          filename: originalFilename,
+          stored_path: storedPath,
+          thumbnail_path: thumbPath
+        });
+        console.log(`✅ Image ${imageId} uploaded successfully:`, originalFilename);
+      } catch (error) {
+        console.error(`❌ Error processing file ${originalFilename || file.originalname}:`, error.message);
+        console.error('Stack:', error.stack);
+      }
+    }
+
+    res.status(201).json({
+      message: `${uploadedImages.length} images uploaded successfully`,
+      images: uploadedImages
+    });
+  } catch (error) {
+    console.error('Batch upload error:', error);
+    res.status(500).json({ error: 'Failed to upload images' });
+  }
+});
+
+// 创建自动标签
+async function createAutoTags(imageId, exifData) {
+  const autoTags = [];
+
+  // 基于分辨率的标签
+  if (exifData.width && exifData.height) {
+    const resolution = exifData.width * exifData.height;
+    if (resolution >= 8000000) {
+      autoTags.push('高清');
+    } else if (resolution >= 2000000) {
+      autoTags.push('标清');
+    }
+
+    // 横竖屏标签
+    if (exifData.width > exifData.height) {
+      autoTags.push('横屏');
+    } else if (exifData.height > exifData.width) {
+      autoTags.push('竖屏');
+    }
+  }
+
+  // 基于拍摄时间的标签
+  if (exifData.takenTime) {
+    const date = new Date(exifData.takenTime);
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    
+    autoTags.push(`${year}年`);
+    autoTags.push(`${year}年${month}月`);
+    
+    // 季节标签
+    if (month >= 3 && month <= 5) autoTags.push('春季');
+    else if (month >= 6 && month <= 8) autoTags.push('夏季');
+    else if (month >= 9 && month <= 11) autoTags.push('秋季');
+    else autoTags.push('冬季');
+  }
+
+  // 基于GPS的标签
+  if (exifData.gpsLatitude && exifData.gpsLongitude) {
+    autoTags.push('有位置信息');
+  }
+
+  // 插入标签
+  for (const tagName of autoTags) {
+    try {
+      // 尝试插入标签，如果已存在则忽略
+      await db.query(
+        'INSERT IGNORE INTO tags (name, type) VALUES (?, ?)',
+        [tagName, 'auto']
+      );
+
+      // 获取标签 ID
+      const [tags] = await db.query('SELECT id FROM tags WHERE name = ?', [tagName]);
+      if (tags.length > 0) {
+        // 关联图片和标签
+        await db.query(
+          'INSERT IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)',
+          [imageId, tags[0].id]
+        );
+      }
+    } catch (error) {
+      console.error(`Error creating tag ${tagName}:`, error);
+    }
   }
 }
 
-ensureDirs();
-
-// 配置 multer 中间件
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    // 使用时间戳+原始文件名确保唯一性
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + '-' + file.originalname);
-  }
-});
-
-const upload = multer({ 
-  storage: storage,
-  limits: {
-    fileSize: 10 * 1024 * 1024 // 限制文件大小为10MB
-  },
-  fileFilter: function (req, file, cb) {
-    // 只允许图片文件
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('只允许上传图片文件!'), false);
-    }
-  }
-});
-
-// 单图上传
-router.post('/upload', upload.single('file'), async (req, res) => {
+// 批量删除图片（必须放在 /:id 路由之前）
+router.delete('/batch', authenticateToken, async (req, res) => {
   try {
-    // 获取用户ID（从认证中间件）
-    const userId = req.userId;
-    
-    // 检查是否有上传文件
-    if (!req.file) {
-      return res.status(400).json({ error: '请选择要上传的文件' });
+    const { imageIds } = req.body;
+
+    if (!imageIds || !Array.isArray(imageIds) || imageIds.length === 0) {
+      return res.status(400).json({ error: 'Image IDs array is required' });
     }
-    
-    // 获取文件信息
-    const originalFilename = req.file.originalname;
-    const filePath = req.file.path;
-    const fileSize = req.file.size;
-    
-    console.log('接收到上传文件:', { originalFilename, filePath, fileSize });
-    
-    // 检查文件是否存在且大小大于0
-    if (!fs.existsSync(filePath) || fileSize === 0) {
-      console.error('上传文件不存在或为空:', { filePath, fileSize });
-      return res.status(400).json({ error: '上传文件无效' });
-    }
-    
-    // 读取图片信息
-    let metadata;
-    try {
-      metadata = await sharp(filePath).metadata();
-      console.log('图片元数据:', metadata);
-    } catch (sharpError) {
-      console.error('读取图片元数据失败:', sharpError.message);
-      // 删除无效文件
-      fs.unlinkSync(filePath);
-      return res.status(400).json({ error: '不支持的图片格式或图片文件已损坏' });
-    }
-    
-    // 生成缩略图
-    const thumbFilename = `thumb_${Date.now()}_${originalFilename}`;
-    const thumbPath = path.join(thumbDir, thumbFilename);
-    await sharp(filePath)
-      .resize(200, 200, { fit: 'inside' })
-      .jpeg({ quality: 80 })
-      .toFile(thumbPath);
-    
-    // 提取EXIF信息
-    let exifData = {};
-    try {
-      const exif = await exifr.parse(filePath);
-      if (exif) {
-        exifData = {
-          taken_time: exif.DateTimeOriginal || exif.DateTime,
-          camera_model: exif.Make || exif.Model,
-          gps_latitude: exif.latitude,
-          gps_longitude: exif.longitude
-        };
-      }
-    } catch (exifError) {
-      console.log('无法读取EXIF信息:', exifError.message);
-    }
-    
-    // 保存到数据库
-    const [result] = await db.execute(
-      `INSERT INTO images 
-        (user_id, original_filename, stored_path, thumb_path, file_size, width, height, taken_time, camera_model, gps_latitude, gps_longitude)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        userId,
-        originalFilename,
-        filePath,
-        thumbPath,
-        fileSize,
-        metadata.width,
-        metadata.height,
-        exifData.taken_time || null,
-        exifData.camera_model || null,
-        exifData.gps_latitude || null,
-        exifData.gps_longitude || null
-      ]
+
+    // 获取所有图片路径
+    const [images] = await db.query(
+      `SELECT id, stored_path, thumbnail_path FROM images 
+       WHERE id IN (${imageIds.map(() => '?').join(',')}) 
+       AND user_id = ? AND deleted_at IS NULL`,
+      [...imageIds, req.user.id]
     );
-    
-    res.status(201).json({
-      message: '图片上传成功',
-      image: {
-        id: result.insertId,
-        original_filename: originalFilename,
-        file_size: fileSize,
-        width: metadata.width,
-        height: metadata.height,
-        taken_time: exifData.taken_time || null,
-        camera_model: exifData.camera_model || null
+
+    if (images.length === 0) {
+      return res.status(404).json({ error: 'No images found' });
+    }
+
+    // 软删除
+    await db.query(
+      `UPDATE images SET deleted_at = NOW() 
+       WHERE id IN (${imageIds.map(() => '?').join(',')}) AND user_id = ?`,
+      [...imageIds, req.user.id]
+    );
+
+    // 删除文件
+    for (const image of images) {
+      try {
+        const imagePath = path.join(__dirname, '..', image.stored_path);
+        const thumbPath = path.join(__dirname, '..', image.thumbnail_path);
+        
+        if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+        if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
+      } catch (fileError) {
+        console.error('Error deleting files:', fileError);
       }
+    }
+
+    res.json({ 
+      message: `${images.length} images deleted successfully`,
+      deletedCount: images.length
     });
   } catch (error) {
-    console.error('图片上传错误:', error);
-    res.status(500).json({ error: '图片上传失败' });
+    console.error('Batch delete error:', error);
+    res.status(500).json({ error: 'Failed to delete images' });
   }
 });
 
-// 分页图片列表查询
-router.get('/', async (req, res) => {
+// 获取图片列表（带分页和筛选）
+router.get('/', authenticateToken, async (req, res) => {
   try {
-    const userId = req.userId;
-    const page = parseInt(req.query.page) || 1;
-    const pageSize = parseInt(req.query.limit) || 10;
-    const offset = (page - 1) * pageSize;
-    
-    // 确保所有参数都是正确的整数类型
-    const intUserId = parseInt(userId);
-    const intLimit = Number.parseInt(pageSize);
-    const intOffset = Number.parseInt(offset);
-    
-    // 构建查询条件
-    let whereClause = 'WHERE user_id = ? AND deleted_at IS NULL';
-    const params = [intUserId];
-    
-    // 添加调试日志
-    console.log('Debug - userId:', userId, 'intUserId:', intUserId);
-    console.log('Debug - page:', page, 'pageSize:', pageSize);
-    console.log('Debug - intLimit:', intLimit, 'intOffset:', intOffset);
-    console.log('Debug - params:', [...params, intOffset, intLimit]);
-    
-    // 验证参数是否有效
-    if (isNaN(intUserId) || isNaN(intLimit) || isNaN(intOffset)) {
-      console.error('Invalid parameters:', { intUserId, intLimit, intOffset });
-      return res.status(400).json({ error: 'Invalid parameters' });
+    const {
+      page = 1,
+      limit = 20,
+      tags,
+      startDate,
+      endDate,
+      keyword,
+      minWidth,
+      maxWidth,
+      minHeight,
+      maxHeight
+    } = req.query;
+
+    const offset = (page - 1) * limit;
+    let whereClause = 'WHERE i.user_id = ? AND i.deleted_at IS NULL';
+    const params = [req.user.id];
+
+    // 标签筛选
+    if (tags) {
+      const tagArray = tags.split(',');
+      whereClause += ` AND i.id IN (
+        SELECT it.image_id FROM image_tags it
+        JOIN tags t ON it.tag_id = t.id
+        WHERE t.name IN (${tagArray.map(() => '?').join(',')})
+        GROUP BY it.image_id
+        HAVING COUNT(DISTINCT t.id) = ?
+      )`;
+      params.push(...tagArray, tagArray.length);
     }
-    
-    // 查询图片列表
-    const [images] = await db.query(
-      `SELECT id, original_filename, stored_path, width, height, taken_time, camera_model, description, created_at
-       FROM images 
-       ${whereClause}
-       ORDER BY created_at DESC
-       LIMIT ?, ?`,
-      [...params, Number(intOffset), Number(intLimit)]
-    );
-    
+
+    // 时间范围筛选
+    if (startDate) {
+      whereClause += ' AND (i.taken_time >= ? OR i.created_at >= ?)';
+      params.push(startDate, startDate);
+    }
+    if (endDate) {
+      whereClause += ' AND (i.taken_time <= ? OR i.created_at <= ?)';
+      params.push(endDate, endDate);
+    }
+
+    // 关键词筛选
+    if (keyword) {
+      whereClause += ' AND (i.original_filename LIKE ? OR i.description LIKE ?)';
+      params.push(`%${keyword}%`, `%${keyword}%`);
+    }
+
+    // 分辨率筛选
+    if (minWidth) {
+      whereClause += ' AND i.width >= ?';
+      params.push(minWidth);
+    }
+    if (maxWidth) {
+      whereClause += ' AND i.width <= ?';
+      params.push(maxWidth);
+    }
+    if (minHeight) {
+      whereClause += ' AND i.height >= ?';
+      params.push(minHeight);
+    }
+    if (maxHeight) {
+      whereClause += ' AND i.height <= ?';
+      params.push(maxHeight);
+    }
+
     // 查询总数
     const [countResult] = await db.query(
-      `SELECT COUNT(*) as total FROM images ${whereClause}`,
+      `SELECT COUNT(DISTINCT i.id) as total FROM images i ${whereClause}`,
       params
     );
-    
+    const total = countResult[0].total;
+
+    // 查询图片列表
+    const [images] = await db.query(
+      `SELECT i.*, GROUP_CONCAT(t.name) as tags
+       FROM images i
+       LEFT JOIN image_tags it ON i.id = it.image_id
+       LEFT JOIN tags t ON it.tag_id = t.id
+       ${whereClause}
+       GROUP BY i.id
+       ORDER BY i.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, parseInt(limit), parseInt(offset)]
+    );
+
     res.json({
       images,
       pagination: {
-        page,
-        limit: intLimit,
-        total: countResult[0].total,
-        pages: Math.ceil(countResult[0].total / intLimit)
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / limit)
       }
     });
   } catch (error) {
-    console.error('查询图片列表错误:', error);
-    res.status(500).json({ error: '查询图片列表失败' });
+    console.error('Get images error:', error);
+    res.status(500).json({ error: 'Failed to fetch images' });
   }
 });
 
-// 图片详情查询
-router.get('/:id', async (req, res) => {
+// 获取图片详情
+router.get('/:id', authenticateToken, async (req, res) => {
   try {
-    const userId = req.userId;
-    const imageId = req.params.id;
-    
-    // 查询图片详情
-    const [images] = await db.execute(
-      `SELECT i.id, i.original_filename, i.stored_path, i.width, i.height, 
-              i.taken_time, i.gps_latitude, i.gps_longitude, i.camera_model, 
-              i.description, i.created_at,
-              GROUP_CONCAT(t.name) as tags
+    const [images] = await db.query(
+      `SELECT i.*, GROUP_CONCAT(t.name) as tags
        FROM images i
        LEFT JOIN image_tags it ON i.id = it.image_id
        LEFT JOIN tags t ON it.tag_id = t.id
        WHERE i.id = ? AND i.user_id = ? AND i.deleted_at IS NULL
        GROUP BY i.id`,
-      [imageId, userId]
+      [req.params.id, req.user.id]
     );
-    
+
     if (images.length === 0) {
-      return res.status(404).json({ error: '图片不存在' });
+      return res.status(404).json({ error: 'Image not found' });
     }
-    
-    const image = images[0];
-    // 将标签字符串转换为数组
-    image.tags = image.tags ? image.tags.split(',') : [];
-    
-    res.json({ image });
+
+    res.json({ image: images[0] });
   } catch (error) {
-    console.error('查询图片详情错误:', error);
-    res.status(500).json({ error: '查询图片详情失败' });
+    console.error('Get image error:', error);
+    res.status(500).json({ error: 'Failed to fetch image' });
   }
 });
 
 // 更新图片信息
-// 更新图片信息
-router.put('/:id', async (req, res) => {
+router.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const userId = req.userId;
+    const { description, tags } = req.body;
     const imageId = req.params.id;
-    const { description } = req.body;
-    
-    // 检查是否提供了可更新的字段
-    if (description === undefined) {
-      return res.status(400).json({ error: '请提供要更新的字段（目前只支持description）' });
-    }
-    
-    // 更新图片信息
-    const [result] = await db.execute(
-      'UPDATE images SET description = ? WHERE id = ? AND user_id = ?',
-      [description, imageId, userId]
-    );
-    
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: '图片不存在' });
-    }
-    
-    res.json({ message: '图片信息更新成功' });
-  } catch (error) {
-    console.error('更新图片信息错误:', error);
-    res.status(500).json({ error: '更新图片信息失败' });
-  }
-});
 
-// 删除图片
-router.delete('/:id', async (req, res) => {
-  try {
-    const userId = req.userId;
-    const imageId = req.params.id;
-    
-    // 先查询图片信息
-    const [images] = await db.execute(
-      'SELECT stored_path, thumb_path FROM images WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
-      [imageId, userId]
+    // 验证图片所有权
+    const [images] = await db.query(
+      'SELECT id FROM images WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+      [imageId, req.user.id]
     );
-    
+
     if (images.length === 0) {
-      return res.status(404).json({ error: '图片不存在' });
+      return res.status(404).json({ error: 'Image not found' });
     }
-    
-    const imagePath = images[0].stored_path;
-    const thumbPath = images[0].thumb_path;
-    
-    // 软删除图片（标记为已删除）
-    const [result] = await db.execute(
-      'UPDATE images SET deleted_at = NOW() WHERE id = ? AND user_id = ?',
-      [imageId, userId]
+
+    // 更新描述
+    if (description !== undefined) {
+      await db.query(
+        'UPDATE images SET description = ? WHERE id = ?',
+        [description, imageId]
+      );
+    }
+
+    // 更新自定义标签
+    if (tags && Array.isArray(tags)) {
+      // 删除旧的自定义标签关联
+      await db.query(
+        `DELETE it FROM image_tags it
+         JOIN tags t ON it.tag_id = t.id
+         WHERE it.image_id = ? AND t.type = 'custom'`,
+        [imageId]
+      );
+
+      // 添加新的自定义标签
+      for (const tagName of tags) {
+        await db.query(
+          'INSERT IGNORE INTO tags (name, type) VALUES (?, ?)',
+          [tagName, 'custom']
+        );
+
+        const [tagResult] = await db.query('SELECT id FROM tags WHERE name = ?', [tagName]);
+        if (tagResult.length > 0) {
+          await db.query(
+            'INSERT IGNORE INTO image_tags (image_id, tag_id) VALUES (?, ?)',
+            [imageId, tagResult[0].id]
+          );
+        }
+      }
+    }
+
+    // 返回更新后的图片信息
+    const [updatedImages] = await db.query(
+      `SELECT i.*, GROUP_CONCAT(t.name) as tags
+       FROM images i
+       LEFT JOIN image_tags it ON i.id = it.image_id
+       LEFT JOIN tags t ON it.tag_id = t.id
+       WHERE i.id = ?
+       GROUP BY i.id`,
+      [imageId]
     );
-    
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: '图片不存在' });
-    }
-    
-    // 尝试删除物理文件
-    try {
-      if (fs.existsSync(imagePath)) {
-        fs.unlinkSync(imagePath);
-      }
-      if (thumbPath && fs.existsSync(thumbPath)) {
-        fs.unlinkSync(thumbPath);
-      }
-    } catch (fileError) {
-      console.warn('删除物理文件时出错:', fileError.message);
-      // 不返回错误给客户端，因为数据库记录已成功删除
-    }
-    
-    res.json({ message: '图片删除成功' });
+
+    res.json({
+      message: 'Image updated successfully',
+      image: updatedImages[0]
+    });
   } catch (error) {
-    console.error('删除图片错误:', error);
-    res.status(500).json({ error: '删除图片失败' });
+    console.error('Update image error:', error);
+    res.status(500).json({ error: 'Failed to update image' });
   }
 });
 
-// 图片裁剪接口
-router.post('/:id/crop', async (req, res) => {
+// 裁剪图片
+router.post('/:id/crop', authenticateToken, async (req, res) => {
   try {
-    const userId = req.userId;
-    const imageId = req.params.id;
     const { x, y, width, height } = req.body;
+    const imageId = req.params.id;
 
-    // 参数验证
-    if (typeof x !== 'number' || typeof y !== 'number' || 
-        typeof width !== 'number' || typeof height !== 'number' ||
-        width <= 0 || height <= 0) {
-      return res.status(400).json({ error: '无效的裁剪参数' });
+    if (x === undefined || y === undefined || width === undefined || height === undefined) {
+      return res.status(400).json({ error: 'Crop parameters (x, y, width, height) are required' });
     }
 
-    // 查询图片信息
-    const [images] = await db.execute(
-      'SELECT stored_path, original_filename FROM images WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
-      [imageId, userId]
+    // 获取原图路径和缩略图路径
+    const [images] = await db.query(
+      'SELECT stored_path, thumbnail_path FROM images WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+      [imageId, req.user.id]
     );
 
     if (images.length === 0) {
-      return res.status(404).json({ error: '图片不存在' });
+      return res.status(404).json({ error: 'Image not found' });
     }
 
-    const imagePath = images[0].stored_path;
-    const originalFilename = images[0].original_filename;
+    const originalPath = path.join(__dirname, '..', images[0].stored_path);
+    const thumbnailPath = path.join(__dirname, '..', images[0].thumbnail_path);
+    const croppedPath = originalPath.replace(/(\.[^.]+)$/, '_cropped$1');
 
-    // 检查图片文件是否存在
-     if (!fs.existsSync(imagePath)) {
-       return res.status(404).json({ error: '图片文件不存在' });
-     }
-
-    // 获取图片元数据以验证裁剪参数
-    const metadata = await sharp(imagePath).metadata();
-    const { width: imgWidth, height: imgHeight } = metadata;
-
-    // 验证裁剪区域是否在图片边界内
-    if (x < 0 || y < 0 || x + width > imgWidth || y + height > imgHeight) {
-      return res.status(400).json({ 
-        error: '裁剪区域超出图片边界',
-        imageDimensions: { width: imgWidth, height: imgHeight },
-        cropRegion: { x, y, width, height }
-      });
-    }
-
-    // 生成新的文件名
-    const ext = path.extname(originalFilename);
-    const baseName = path.basename(originalFilename, ext);
-    const timestamp = Date.now();
-    const newFileName = `${baseName}_cropped_${timestamp}${ext}`;
-    const uploadsDir = path.join(__dirname, '../public/uploads');
-    const newImagePath = path.join(uploadsDir, newFileName);
-
-    // 确保uploads目录存在
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-    }
-
-    // 执行裁剪操作
-    await sharp(imagePath)
-      .extract({ left: Math.round(x), top: Math.round(y), width: Math.round(width), height: Math.round(height) })
-      .toFile(newImagePath);
+    // 执行裁剪
+    await cropImage(originalPath, croppedPath, { x, y, width, height });
 
     // 生成新的缩略图
-    const thumbDir = path.join(__dirname, '../public/uploads/thumbnails');
-    
-    // 确保thumbnails目录存在
-    if (!fs.existsSync(thumbDir)) {
-      fs.mkdirSync(thumbDir, { recursive: true });
+    const croppedThumbPath = croppedPath.replace(/(\.[^.]+)$/, '_thumb$1');
+    await generateThumbnail(croppedPath, croppedThumbPath);
+
+    // 替换原图和缩略图
+    if (fs.existsSync(originalPath)) {
+      fs.unlinkSync(originalPath);
     }
-    
-    const thumbFileName = `thumb_${newFileName}`;
-    const thumbPath = path.join(thumbDir, thumbFileName);
-    
-    await sharp(newImagePath)
-      .resize(200, 200, { fit: 'inside' })
-      .jpeg({ quality: 80 })
-      .toFile(thumbPath);
-
-    // 更新数据库记录
-    const [result] = await db.execute(
-      'UPDATE images SET stored_path = ?, thumb_path = ?, original_filename = ? WHERE id = ? AND user_id = ?',
-      [newImagePath, thumbPath, newFileName, imageId, userId]
-    );
-
-    if (result.affectedRows === 0) {
-      // 如果更新失败，删除刚刚创建的文件
-      try {
-        if (fs.existsSync(newImagePath)) {
-          fs.unlinkSync(newImagePath);
-        }
-        if (fs.existsSync(thumbPath)) {
-          fs.unlinkSync(thumbPath);
-        }
-      } catch (unlinkError) {
-        console.error('清理文件失败:', unlinkError);
-      }
-      return res.status(500).json({ error: '裁剪操作失败' });
+    if (fs.existsSync(thumbnailPath)) {
+      fs.unlinkSync(thumbnailPath);
     }
+    fs.renameSync(croppedPath, originalPath);
+    fs.renameSync(croppedThumbPath, thumbnailPath);
 
-    res.json({ 
-      message: '图片裁剪成功',
-      imagePath: newImagePath,
-      thumbPath: thumbPath
-    });
+    res.json({ message: 'Image cropped successfully' });
   } catch (error) {
-    console.error('图片裁剪错误:', error);
-    res.status(500).json({ error: '图片裁剪失败' });
+    console.error('Crop image error:', error);
+    res.status(500).json({ error: 'Failed to crop image' });
   }
 });
 
-// 图片色调调整接口
-router.post('/:id/adjust', async (req, res) => {
+// 调整图片色调
+router.post('/:id/adjust', authenticateToken, async (req, res) => {
   try {
-    const userId = req.userId;
+    const { brightness, saturation, contrast } = req.body;
     const imageId = req.params.id;
-    const { brightness, contrast, saturation } = req.body;
 
-    // 参数验证
-    if ((brightness !== undefined && (typeof brightness !== 'number' || brightness < 0 || brightness > 200)) ||
-        (contrast !== undefined && (typeof contrast !== 'number' || contrast < 0 || contrast > 200)) ||
-        (saturation !== undefined && (typeof saturation !== 'number' || saturation < 0 || saturation > 200))) {
-      return res.status(400).json({ error: '无效的调整参数' });
-    }
-
-    // 查询图片信息
-    const [images] = await db.execute(
-      'SELECT stored_path FROM images WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
-      [imageId, userId]
+    // 获取原图路径和缩略图路径
+    const [images] = await db.query(
+      'SELECT stored_path, thumbnail_path FROM images WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+      [imageId, req.user.id]
     );
 
     if (images.length === 0) {
-      return res.status(404).json({ error: '图片不存在' });
+      return res.status(404).json({ error: 'Image not found' });
     }
 
-    const imagePath = images[0].stored_path;
+    const originalPath = path.join(__dirname, '..', images[0].stored_path);
+    const thumbnailPath = path.join(__dirname, '..', images[0].thumbnail_path);
+    const adjustedPath = originalPath.replace(/(\.[^.]+)$/, '_adjusted$1');
 
-    // 生成新的文件名
-    const ext = path.extname(imagePath);
-    const baseName = path.basename(imagePath, ext);
-    const newFileName = `${baseName}_adjusted_${Date.now()}${ext}`;
-    const newImagePath = path.join(path.dirname(imagePath), newFileName);
-
-    // 构建调整选项
-    const sharpInstance = sharp(imagePath);
-    const modifiers = {};
-
-    if (brightness !== undefined) {
-      modifiers.brightness = brightness / 100;
-    }
-    if (contrast !== undefined) {
-      modifiers.contrast = contrast / 100;
-    }
-    if (saturation !== undefined) {
-      modifiers.saturation = saturation / 100;
-    }
-
-    // 应用调整
-    await sharpInstance.modulate(modifiers).toFile(newImagePath);
+    // 执行调整
+    await adjustImage(originalPath, adjustedPath, { brightness, saturation, contrast });
 
     // 生成新的缩略图
-    const thumbDir = path.join(__dirname, '../public/uploads/thumbnails');
-    const thumbFileName = `thumb_${newFileName}`;
-    const thumbPath = path.join(thumbDir, thumbFileName);
-    
-    await sharp(newImagePath)
-      .resize(200, 200, { fit: 'inside' })
-      .jpeg({ quality: 80 })
-      .toFile(thumbPath);
+    const adjustedThumbPath = adjustedPath.replace(/(\.[^.]+)$/, '_thumb$1');
+    await generateThumbnail(adjustedPath, adjustedThumbPath);
 
-    // 更新数据库记录
-    const [result] = await db.execute(
-      'UPDATE images SET stored_path = ?, thumb_path = ? WHERE id = ? AND user_id = ?',
-      [newImagePath, thumbPath, imageId, userId]
+    // 替换原图和缩略图
+    if (fs.existsSync(originalPath)) {
+      fs.unlinkSync(originalPath);
+    }
+    if (fs.existsSync(thumbnailPath)) {
+      fs.unlinkSync(thumbnailPath);
+    }
+    fs.renameSync(adjustedPath, originalPath);
+    fs.renameSync(adjustedThumbPath, thumbnailPath);
+
+    res.json({ message: 'Image adjusted successfully' });
+  } catch (error) {
+    console.error('Adjust image error:', error);
+    res.status(500).json({ error: 'Failed to adjust image' });
+  }
+});
+
+// 删除单张图片
+router.delete('/:id', authenticateToken, async (req, res) => {
+  try {
+    const imageId = req.params.id;
+
+    // 获取图片路径
+    const [images] = await db.query(
+      'SELECT stored_path, thumbnail_path FROM images WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+      [imageId, req.user.id]
     );
 
-    if (result.affectedRows === 0) {
-      // 如果更新失败，删除刚刚创建的文件
-      try {
-        await fsp.unlink(newImagePath);
-        await fsp.unlink(thumbPath);
-      } catch (unlinkError) {
-        console.error('清理文件失败:', unlinkError);
-      }
-      return res.status(500).json({ error: '色调调整操作失败' });
+    if (images.length === 0) {
+      return res.status(404).json({ error: 'Image not found' });
     }
 
-    res.json({ 
-      message: '图片色调调整成功',
-      imagePath: newImagePath,
-      thumbPath: thumbPath
-    });
+    // 软删除（设置 deleted_at）
+    await db.query(
+      'UPDATE images SET deleted_at = NOW() WHERE id = ?',
+      [imageId]
+    );
+
+    // 也可以选择物理删除文件
+    try {
+      const imagePath = path.join(__dirname, '..', images[0].stored_path);
+      const thumbPath = path.join(__dirname, '..', images[0].thumbnail_path);
+      
+      if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+      if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
+    } catch (fileError) {
+      console.error('Error deleting files:', fileError);
+    }
+
+    res.json({ message: 'Image deleted successfully' });
   } catch (error) {
-    console.error('图片色调调整错误:', error);
-    res.status(500).json({ error: '图片色调调整失败' });
+    console.error('Delete image error:', error);
+    res.status(500).json({ error: 'Failed to delete image' });
   }
 });
 

@@ -1,142 +1,139 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const db = require('../config/db');
-const { authenticateToken } = require('../middleware/auth');
+const db = require('../config/database');
+const { generateToken, authenticateToken } = require('../middleware/auth');
 
 // 用户注册
 router.post('/register', async (req, res) => {
   try {
     const { username, email, password } = req.body;
-    
+
     // 验证输入
     if (!username || !email || !password) {
-      return res.status(400).json({ error: '用户名、邮箱和密码都是必填项' });
+      return res.status(400).json({ error: 'All fields are required' });
     }
-    
+
+    // 验证用户名长度
     if (username.length < 6 || username.length > 20) {
-      return res.status(400).json({ error: '用户名长度必须在6-20个字符之间' });
+      return res.status(400).json({ error: 'Username must be 6-20 characters' });
     }
-    
+
+    // 验证用户名格式（字母、数字、下划线）
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      return res.status(400).json({ error: 'Username can only contain letters, numbers and underscores' });
+    }
+
+    // 验证密码长度
     if (password.length < 6) {
-      return res.status(400).json({ error: '密码长度至少6位' });
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
-    
+
     // 验证邮箱格式
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: '邮箱格式不正确' });
+      return res.status(400).json({ error: 'Invalid email format' });
     }
-    
-    // 检查用户名和邮箱是否已存在
-    const [existingUsers] = await db.execute(
-      'SELECT id FROM users WHERE username = ? OR email = ?',
-      [username, email]
+
+    // 检查用户名是否已存在
+    const [existingUsers] = await db.query(
+      'SELECT id FROM users WHERE username = ?',
+      [username]
     );
-    
     if (existingUsers.length > 0) {
-      return res.status(400).json({ error: '用户名或邮箱已存在' });
+      return res.status(409).json({ error: 'Username already exists' });
     }
-    
-    // 密码加密
+
+    // 检查邮箱是否已存在
+    const [existingEmails] = await db.query(
+      'SELECT id FROM users WHERE email = ?',
+      [email]
+    );
+    if (existingEmails.length > 0) {
+      return res.status(409).json({ error: 'Email already exists' });
+    }
+
+    // 加密密码
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
-    
+
     // 插入新用户
-    const [result] = await db.execute(
+    const [result] = await db.query(
       'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
       [username, email, passwordHash]
     );
-    
-    // 生成JWT token
-    const token = jwt.sign(
-      { userId: result.insertId, username },
-      process.env.JWT_SECRET || 'default_secret',
-      { expiresIn: '24h' }
-    );
-    
+
     res.status(201).json({
-      message: '用户注册成功',
-      token,
-      user: { id: result.insertId, username, email }
+      message: 'User registered successfully',
+      userId: result.insertId
     });
   } catch (error) {
-    console.error('注册错误:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    console.error('Registration error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // 用户登录
 router.post('/login', async (req, res) => {
   try {
-    const { username, password } = req.body;
-    
-    // 验证输入
-    if (!username || !password) {
-      return res.status(400).json({ error: '用户名和密码都是必填项' });
+    const { usernameOrEmail, password } = req.body;
+
+    if (!usernameOrEmail || !password) {
+      return res.status(400).json({ error: 'Username/email and password are required' });
     }
-    
-    // 查找用户
-    const [users] = await db.execute(
+
+    // 查找用户（支持用户名或邮箱登录）
+    const [users] = await db.query(
       'SELECT id, username, email, password_hash FROM users WHERE username = ? OR email = ?',
-      [username, username]
+      [usernameOrEmail, usernameOrEmail]
     );
-    
+
     if (users.length === 0) {
-      return res.status(401).json({ error: '用户名或密码不正确' });
+      return res.status(401).json({ error: 'Invalid credentials' });
     }
-    
+
     const user = users[0];
-    
+
     // 验证密码
-    const isValidPassword = await bcrypt.compare(password, user.password_hash);
-    if (!isValidPassword) {
-      return res.status(401).json({ error: '用户名或密码不正确' });
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
     }
-    
-    // 生成JWT token
-    const token = jwt.sign(
-      { userId: user.id, username: user.username },
-      process.env.JWT_SECRET || 'default_secret',
-      { expiresIn: '24h' }
-    );
-    
+
+    // 生成 JWT token
+    const token = generateToken(user);
+
     res.json({
-      message: '登录成功',
+      message: 'Login successful',
       token,
-      user: { id: user.id, username: user.username, email: user.email }
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email
+      }
     });
   } catch (error) {
-    console.error('登录错误:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // 获取当前用户信息
 router.get('/me', authenticateToken, async (req, res) => {
   try {
-    // 从请求中获取用户ID（在实际应用中，这会通过中间件解析JWT获得）
-    const userId = req.userId;
-    
-    if (!userId) {
-      return res.status(401).json({ error: '未授权访问' });
-    }
-    
-    // 获取用户信息
-    const [users] = await db.execute(
+    const [users] = await db.query(
       'SELECT id, username, email, created_at FROM users WHERE id = ?',
-      [userId]
+      [req.user.id]
     );
-    
+
     if (users.length === 0) {
-      return res.status(404).json({ error: '用户不存在' });
+      return res.status(404).json({ error: 'User not found' });
     }
-    
+
     res.json({ user: users[0] });
   } catch (error) {
-    console.error('获取用户信息错误:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    console.error('Get user error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

@@ -1,305 +1,374 @@
 <template>
-  <div class="gallery-container">
-    <div class="gallery-header">
-      <h2>图片 gallery</h2>
-      <div class="search-bar">
-        <el-input
-          v-model="searchQuery"
-          placeholder="搜索图片..."
-          style="width: 300px; margin-right: 20px;"
-          clearable
-        >
-          <template #prefix>
-            <el-icon><Search /></el-icon>
-          </template>
-        </el-input>
-        <el-select
-          v-model="selectedTags"
-          multiple
-          filterable
-          placeholder="选择标签"
-          style="width: 200px;"
-        >
-          <el-option
-            v-for="tag in availableTags"
-            :key="tag.id"
-            :label="tag.name"
-            :value="tag.id"
-          />
-        </el-select>
-      </div>
-    </div>
-    
-    <div class="image-grid">
-      <div 
-        v-for="image in images" 
-        :key="image.id" 
-        class="image-card"
-        @click="viewImageDetails(image)"
-      >
-        <el-image
-          :src="image.thumbnailUrl"
-          fit="cover"
-          class="image-preview"
-          lazy
-        >
-          <template #placeholder>
-            <div class="image-placeholder">
-              <el-icon><Picture /></el-icon>
-            </div>
-          </template>
-        </el-image>
-        <div class="image-info">
-          <h3>{{ image.title }}</h3>
-          <div class="image-tags">
-            <el-tag 
-              v-for="tag in image.tags.slice(0, 3)" 
-              :key="tag.id" 
-              size="small"
-              style="margin-right: 5px;"
+  <MainLayout>
+    <div class="gallery-page">
+      <!-- 搜索和筛选 -->
+      <el-card class="filter-card">
+        <el-row :gutter="16">
+          <el-col :span="8">
+            <el-input
+              v-model="filters.keyword"
+              placeholder="搜索图片..."
+              clearable
+              @change="handleSearch"
             >
-              {{ tag.name }}
-            </el-tag>
-            <el-tag v-if="image.tags.length > 3" size="small">
-              +{{ image.tags.length - 3 }}
-            </el-tag>
-          </div>
-          <p class="upload-date">{{ formatDate(image.uploadDate) }}</p>
+              <template #prefix>
+                <el-icon><Search /></el-icon>
+              </template>
+            </el-input>
+          </el-col>
+
+          <el-col :span="8">
+            <el-select
+              v-model="filters.tags"
+              multiple
+              placeholder="选择标签"
+              clearable
+              filterable
+              @change="handleSearch"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="tag in allTags"
+                :key="tag.id"
+                :label="tag.name"
+                :value="tag.name"
+              />
+            </el-select>
+          </el-col>
+
+          <el-col :span="8">
+            <el-date-picker
+              v-model="dateRange"
+              type="daterange"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              @change="handleDateChange"
+              style="width: 100%"
+            />
+          </el-col>
+        </el-row>
+
+        <div class="filter-actions">
+          <el-button @click="handleReset">重置</el-button>
+          <el-button
+            v-if="selectedImages.length > 0"
+            type="danger"
+            @click="handleBatchDelete"
+          >
+            删除选中 ({{ selectedImages.length }})
+          </el-button>
         </div>
-      </div>
+      </el-card>
+
+      <!-- 图片网格 -->
+      <el-card class="images-card">
+        <el-skeleton :loading="loading" :rows="5" animated>
+          <div v-if="images.length === 0" class="empty-state">
+            <el-empty description="暂无图片">
+              <el-button type="primary" @click="router.push('/upload')">
+                上传图片
+              </el-button>
+            </el-empty>
+          </div>
+
+          <div v-else>
+            <div class="image-grid">
+              <div
+                v-for="image in images"
+                :key="image.id"
+                class="image-card"
+                :class="{ selected: selectedImages.includes(image.id) }"
+              >
+                <el-checkbox
+                  v-model="selectedImages"
+                  :label="image.id"
+                  class="image-checkbox"
+                />
+
+                <div class="image-wrapper" @click="router.push(`/image/${image.id}/edit`)">
+                  <img
+                    :src="getImageUrl(image.thumbnail_path || image.stored_path, image.id)"
+                    :alt="image.original_filename"
+                  />
+                </div>
+
+                <div class="image-info">
+                  <div class="image-name">{{ image.original_filename }}</div>
+                  <div class="image-meta">
+                    <span v-if="image.width && image.height">
+                      {{ image.width }} × {{ image.height }}
+                    </span>
+                    <span>{{ formatDate(image.created_at) }}</span>
+                  </div>
+                  <div class="image-tags" v-if="image.tags">
+                    <el-tag
+                      v-for="tag in image.tags.split(',').slice(0, 3)"
+                      :key="tag"
+                      size="small"
+                    >
+                      {{ tag }}
+                    </el-tag>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 分页 -->
+            <div class="pagination-wrapper">
+              <el-pagination
+                v-model:current-page="pagination.page"
+                v-model:page-size="pagination.limit"
+                :total="pagination.total"
+                :page-sizes="[12, 24, 48, 96]"
+                layout="total, sizes, prev, pager, next, jumper"
+                @current-change="handlePageChange"
+                @size-change="handleSizeChange"
+              />
+            </div>
+          </div>
+        </el-skeleton>
+      </el-card>
     </div>
-    
-    <div class="pagination-container">
-      <el-pagination
-        v-model:current-page="currentPage"
-        v-model:page-size="pageSize"
-        :total="totalImages"
-        :page-sizes="[12, 24, 48, 96]"
-        layout="total, sizes, prev, pager, next, jumper"
-        @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
-      />
-    </div>
-  </div>
+  </MainLayout>
 </template>
 
-<script>
-import { ref, reactive, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
-import { Search, Picture } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+<script setup>
+import { ref, reactive, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import MainLayout from '@/components/MainLayout.vue';
+import { useImagesStore } from '@/stores/images';
+import { useTagsStore } from '@/stores/tags';
 
-export default {
-  name: 'GalleryView',
-  components: {
-    Search,
-    Picture
-  },
-  setup() {
-    const router = useRouter()
-    
-    // 数据状态
-    const images = ref([])
-    const availableTags = ref([])
-    const searchQuery = ref('')
-    const selectedTags = ref([])
-    const currentPage = ref(1)
-    const pageSize = ref(12)
-    const totalImages = ref(0)
-    
-    // 模拟数据
-    const mockImages = [
-      {
-        id: 1,
-        title: '风景照片 1',
-        thumbnailUrl: 'https://picsum.photos/300/200?random=1',
-        uploadDate: '2023-05-15T10:30:00Z',
-        tags: [
-          { id: 1, name: '风景' },
-          { id: 2, name: '自然' },
-          { id: 3, name: '山川' }
-        ]
-      },
-      {
-        id: 2,
-        title: '城市夜景',
-        thumbnailUrl: 'https://picsum.photos/300/200?random=2',
-        uploadDate: '2023-05-16T14:45:00Z',
-        tags: [
-          { id: 4, name: '城市' },
-          { id: 5, name: '夜晚' }
-        ]
-      },
-      {
-        id: 3,
-        title: '动物写真',
-        thumbnailUrl: 'https://picsum.photos/300/200?random=3',
-        uploadDate: '2023-05-17T09:15:00Z',
-        tags: [
-          { id: 6, name: '动物' },
-          { id: 7, name: '宠物' }
-        ]
-      }
-    ]
-    
-    const mockTags = [
-      { id: 1, name: '风景' },
-      { id: 2, name: '自然' },
-      { id: 3, name: '山川' },
-      { id: 4, name: '城市' },
-      { id: 5, name: '夜晚' },
-      { id: 6, name: '动物' },
-      { id: 7, name: '宠物' },
-      { id: 8, name: '人物' },
-      { id: 9, name: '建筑' }
-    ]
-    
-    // 加载图片数据
-    const loadImages = async () => {
-      try {
-        // 模拟API调用
-        await new Promise(resolve => setTimeout(resolve, 500))
-        images.value = mockImages
-        totalImages.value = mockImages.length
-      } catch (error) {
-        ElMessage.error('加载图片失败: ' + error.message)
-      }
-    }
-    
-    // 加载标签数据
-    const loadTags = async () => {
-      try {
-        // 模拟API调用
-        await new Promise(resolve => setTimeout(resolve, 300))
-        availableTags.value = mockTags
-      } catch (error) {
-        ElMessage.error('加载标签失败: ' + error.message)
-      }
-    }
-    
-    // 格式化日期
-    const formatDate = (dateString) => {
-      const date = new Date(dateString)
-      return date.toLocaleDateString('zh-CN')
-    }
-    
-    // 查看图片详情
-    const viewImageDetails = (image) => {
-      router.push(`/image/${image.id}`)
-    }
-    
-    // 分页处理
-    const handleSizeChange = (val) => {
-      pageSize.value = val
-      loadImages()
-    }
-    
-    const handleCurrentChange = (val) => {
-      currentPage.value = val
-      loadImages()
-    }
-    
-    // 初始化数据
-    onMounted(() => {
-      loadImages()
-      loadTags()
-    })
-    
-    return {
-      images,
-      availableTags,
-      searchQuery,
-      selectedTags,
-      currentPage,
-      pageSize,
-      totalImages,
-      formatDate,
-      viewImageDetails,
-      handleSizeChange,
-      handleCurrentChange
-    }
+const router = useRouter();
+const imagesStore = useImagesStore();
+const tagsStore = useTagsStore();
+
+const loading = ref(false);
+const images = ref([]);
+const allTags = ref([]);
+const selectedImages = ref([]);
+const dateRange = ref([]);
+
+const filters = reactive({
+  keyword: '',
+  tags: []
+});
+
+const pagination = reactive({
+  page: 1,
+  limit: 24,
+  total: 0
+});
+
+const getImageUrl = (path, imageId) => {
+  if (!path) return '';
+  const baseURL = import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || 'http://localhost:3000';
+  const base = `${baseURL}/${path}`;
+  const bust = imagesStore.cacheBust?.[String(imageId)];
+  if (!bust) return base;
+  return base.includes('?') ? `${base}&t=${bust}` : `${base}?t=${bust}`;
+};
+
+const formatDate = (dateString) => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  return date.toLocaleDateString('zh-CN');
+};
+
+const loadImages = async () => {
+  loading.value = true;
+  try {
+    const response = await imagesStore.fetchImages({
+      page: pagination.page,
+      limit: pagination.limit,
+      ...filters,
+      startDate: dateRange.value[0] || null,
+      endDate: dateRange.value[1] || null
+    });
+    images.value = response.images;
+    pagination.total = response.pagination.total;
+    selectedImages.value = [];
+  } catch (error) {
+    console.error('Failed to load images:', error);
+  } finally {
+    loading.value = false;
   }
-}
+};
+
+const loadTags = async () => {
+  try {
+    allTags.value = await tagsStore.fetchTags();
+  } catch (error) {
+    console.error('Failed to load tags:', error);
+  }
+};
+
+const handleSearch = () => {
+  pagination.page = 1;
+  loadImages();
+};
+
+const handleDateChange = () => {
+  pagination.page = 1;
+  loadImages();
+};
+
+const handleReset = () => {
+  filters.keyword = '';
+  filters.tags = [];
+  dateRange.value = [];
+  pagination.page = 1;
+  loadImages();
+};
+
+const handlePageChange = (page) => {
+  pagination.page = page;
+  loadImages();
+};
+
+const handleSizeChange = (size) => {
+  pagination.limit = size;
+  pagination.page = 1;
+  loadImages();
+};
+
+const handleBatchDelete = () => {
+  ElMessageBox.confirm(
+    `确定要删除选中的 ${selectedImages.value.length} 张图片吗？`,
+    '批量删除',
+    {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  ).then(async () => {
+    try {
+      await imagesStore.deleteImages(selectedImages.value);
+      ElMessage.success('删除成功');
+      loadImages();
+    } catch (error) {
+      console.error('Failed to delete images:', error);
+    }
+  });
+};
+
+onMounted(() => {
+  loadImages();
+  loadTags();
+});
 </script>
 
 <style scoped>
-.gallery-container {
-  padding: 20px;
+.gallery-page {
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
-.gallery-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 30px;
+.filter-card {
+  margin-bottom: 24px;
 }
 
-.search-bar {
+.filter-actions {
   display: flex;
-  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  justify-content: flex-end;
+}
+
+.images-card {
+  min-height: 500px;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
 }
 
 .image-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 20px;
-  margin-bottom: 30px;
+  margin-bottom: 24px;
 }
 
 .image-card {
-  border: 1px solid #ebeef5;
+  position: relative;
+  background: #fff;
+  border: 2px solid #e4e7ed;
   border-radius: 8px;
   overflow: hidden;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-  cursor: pointer;
+  transition: all 0.3s;
 }
 
 .image-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-color: #409eff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
 }
 
-.image-preview {
-  width: 100%;
-  height: 200px;
+.image-card.selected {
+  border-color: #409eff;
+  background: #ecf5ff;
 }
 
-.image-placeholder {
-  display: flex;
-  justify-content: center;
-  align-items: center;
+.image-checkbox {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 4px;
+  border-radius: 4px;
+}
+
+:deep(.image-checkbox .el-checkbox__label) {
+  display: none;
+}
+
+.image-wrapper {
+  cursor: pointer;
+}
+
+.image-wrapper img {
   width: 100%;
-  height: 100%;
-  background-color: #f5f5f5;
-  color: #909399;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
 }
 
 .image-info {
-  padding: 15px;
+  padding: 12px;
 }
 
-.image-info h3 {
-  margin: 0 0 10px 0;
-  font-size: 16px;
+.image-name {
+  font-size: 14px;
+  font-weight: 500;
   color: #333;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 8px;
+}
+
+.image-meta {
+  font-size: 12px;
+  color: #999;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
 }
 
 .image-tags {
-  margin-bottom: 10px;
-  min-height: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
-.upload-date {
-  margin: 0;
-  font-size: 12px;
-  color: #909399;
-}
-
-.pagination-container {
+.pagination-wrapper {
   display: flex;
   justify-content: center;
+  padding: 20px 0;
 }
 </style>
+

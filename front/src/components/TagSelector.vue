@@ -1,26 +1,33 @@
 <template>
   <div class="tag-selector">
     <div class="selected-tags" v-if="modelValue && modelValue.length > 0">
-      <el-tag
+      <div
         v-for="tag in modelValue"
         :key="tag.id"
-        closable
-        @close="removeTag(tag)"
-        style="margin-right: 10px; margin-bottom: 10px;"
+        class="tag-chip"
       >
-        {{ tag.name }}
-      </el-tag>
+        <span class="tag-name">{{ tag.name }}</span>
+        <button class="tag-remove" @click="removeTag(tag)">×</button>
+      </div>
     </div>
-    
+
     <div class="tag-input-area">
+      <el-input
+        v-model="inputValue"
+        placeholder="输入新标签并回车，或搜索选择已有标签"
+        @keyup.enter.native="createOrAdd"
+        clearable
+        class="tag-input"
+      />
+
       <el-select
         v-model="selectedTag"
         filterable
         remote
         :remote-method="searchTags"
         :loading="loading"
-        placeholder="请选择或搜索标签"
-        style="width: 100%;"
+        placeholder="搜索标签并回车添加"
+        class="tag-select"
         @change="addTag"
       >
         <el-option
@@ -53,6 +60,7 @@ export default {
   emits: ['update:modelValue'],
   setup(props, { emit }) {
     const selectedTag = ref('')
+    const inputValue = ref('')
     const tagOptions = ref([])
     const loading = ref(false)
     const allTags = ref([
@@ -105,12 +113,30 @@ export default {
         }
       }
       selectedTag.value = ''
+      inputValue.value = ''
     }
     
     // 删除标签
     const removeTag = (tag) => {
       const newValue = props.modelValue.filter(t => t.id !== tag.id)
       emit('update:modelValue', newValue)
+    }
+
+    const createOrAdd = () => {
+      const name = inputValue.value && inputValue.value.trim()
+      if (!name) return
+
+      // 尝试在已有标签中查找
+      let found = allTags.value.find(t => t.name === name)
+      if (!found) {
+        // 生成临时 id（前端）
+        const newId = Date.now()
+        found = { id: newId, name }
+        // 可选：将新标签加入全局列表
+        allTags.value.unshift(found)
+      }
+
+      addTag(found)
     }
     
     // 初始化标签选项
@@ -120,11 +146,13 @@ export default {
     
     return {
       selectedTag,
+      inputValue,
       tagOptions,
       loading,
       searchTags,
       addTag,
       removeTag
+      ,createOrAdd
     }
   }
 }
@@ -136,7 +164,47 @@ export default {
 }
 
 .selected-tags {
-  margin-bottom: 15px;
-  min-height: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  background: linear-gradient(180deg,#fff,#f5f7fa);
+  border: 1px solid #e6e9ef;
+  padding: 6px 10px;
+  border-radius: 20px;
+  box-shadow: 0 1px 2px rgba(16,24,40,0.04);
+}
+
+.tag-name {
+  margin-right: 8px;
+  color: #324057;
+  font-size: 13px;
+}
+
+.tag-remove {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #8b9bb1;
+  font-weight: 600;
+}
+
+.tag-input-area {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.tag-input {
+  flex: 1;
+}
+
+.tag-select {
+  width: 260px;
 }
 </style>
