@@ -7,6 +7,7 @@
           name="images"
           :action="uploadUrl"
       :headers="uploadHeaders"
+      :data="uploadData"
       :on-success="handleSuccess"
       :on-error="handleError"
       :before-upload="beforeUpload"
@@ -26,6 +27,28 @@
       </template>
     </el-upload>
     
+        <div class="upload-options" v-if="fileList.length > 0">
+          <el-form label-width="80px">
+            <el-form-item label="添加描述">
+              <el-switch 
+                v-model="enableDescription" 
+                active-text="是" 
+                inactive-text="否"
+              />
+            </el-form-item>
+            <el-form-item v-if="enableDescription" label="图片描述">
+              <el-input
+                v-model="imageDescription"
+                type="textarea"
+                :rows="3"
+                maxlength="200"
+                show-word-limit
+                placeholder="为这批图片添加统一描述（可选，最多200字）"
+              />
+            </el-form-item>
+          </el-form>
+        </div>
+
         <div class="upload-actions" v-if="fileList.length > 0">
           <el-button @click="clearFiles">清空</el-button>
           <el-button type="primary" :loading="uploading" @click="submitUpload">
@@ -74,11 +97,19 @@ const uploadRef = ref();
 const fileList = ref([]);
 const uploading = ref(false);
 const uploadedImages = ref([]);
+const enableDescription = ref(false);
+const imageDescription = ref('');
 
 const uploadUrl = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api'}/images/upload/batch`;
 
 const uploadHeaders = {
   Authorization: `Bearer ${userStore.token}`
+};
+
+const uploadData = {
+  get description() {
+    return enableDescription.value && imageDescription.value ? imageDescription.value : '';
+  }
 };
     
     const beforeUpload = (file) => {
@@ -132,6 +163,8 @@ const handleError = (error, file, fileList) => {
 const clearFiles = () => {
   fileList.value = [];
   uploadRef.value.clearFiles();
+  enableDescription.value = false;
+  imageDescription.value = '';
 };
 
 const getImageUrl = (path) => {
@@ -174,11 +207,18 @@ const getImageUrl = (path) => {
   text-align: center;
 }
 
+.upload-options {
+  margin-top: 24px;
+  padding: 16px;
+  background: #f5f7fa;
+  border-radius: 8px;
+}
+
 .upload-actions {
   display: flex;
   justify-content: center;
   gap: 20px;
-  margin-top: 30px;
+  margin-top: 20px;
 }
 
 .uploaded-card {

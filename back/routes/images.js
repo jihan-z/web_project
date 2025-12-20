@@ -5,7 +5,7 @@ const fs = require('fs');
 const db = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 const upload = require('../middleware/upload');
-const { generateThumbnail, extractExifData, cropImage, adjustImage } = require('../utils/imageProcessor');
+const { generateThumbnail, extractExifData, extractFullExifData, cropImage, adjustImage } = require('../utils/imageProcessor');
 
 // 修复文件名编码（处理中文）
 const fixFilename = (filename) => {
@@ -101,6 +101,9 @@ router.post('/upload/batch', authenticateToken, upload.array('images', 10), asyn
       return res.status(400).json({ error: 'No files uploaded' });
     }
 
+    // 获取描述（如果提供）
+    const description = req.body.description || '';
+
     const uploadedImages = [];
 
     for (const file of req.files) {
@@ -143,8 +146,8 @@ router.post('/upload/batch', authenticateToken, upload.array('images', 10), asyn
 
         const [result] = await db.query(
           `INSERT INTO images (user_id, original_filename, stored_path, thumbnail_path, 
-           width, height, taken_time, gps_latitude, gps_longitude, camera_model) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           width, height, taken_time, gps_latitude, gps_longitude, camera_model, description) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             req.user.id,
             originalFilename,
@@ -155,7 +158,8 @@ router.post('/upload/batch', authenticateToken, upload.array('images', 10), asyn
             exifData.takenTime,
             exifData.gpsLatitude,
             exifData.gpsLongitude,
-            exifData.cameraModel
+            exifData.cameraModel,
+            description
           ]
         );
 
@@ -200,9 +204,9 @@ async function createAutoTags(imageId, exifData) {
   // 基于分辨率的标签
   if (exifData.width && exifData.height) {
     const resolution = exifData.width * exifData.height;
-    if (resolution >= 8000000) {
+    if (resolution >= 2073600) {
       autoTags.push('高清');
-    } else if (resolution >= 2000000) {
+    } else if (resolution >= 921600) {
       autoTags.push('标清');
     }
 
@@ -415,6 +419,9 @@ router.get('/', authenticateToken, async (req, res) => {
 // 获取图片详情
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
+    const { includeExif } = req.query;
+    const imageId = req.params.id;
+    
     const [images] = await db.query(
       `SELECT i.*, GROUP_CONCAT(t.name) as tags
        FROM images i
@@ -422,14 +429,30 @@ router.get('/:id', authenticateToken, async (req, res) => {
        LEFT JOIN tags t ON it.tag_id = t.id
        WHERE i.id = ? AND i.user_id = ? AND i.deleted_at IS NULL
        GROUP BY i.id`,
-      [req.params.id, req.user.id]
+      [imageId, req.user.id]
     );
 
     if (images.length === 0) {
       return res.status(404).json({ error: 'Image not found' });
     }
 
-    res.json({ image: images[0] });
+    const image = images[0];
+    
+    // 如果需要详细 EXIF 信息，从文件重新读取
+    if (includeExif === 'true' || includeExif === '1') {
+      try {
+        const imagePath = path.join(__dirname, '..', image.stored_path);
+        if (fs.existsSync(imagePath)) {
+          const fullExif = await extractFullExifData(imagePath);
+          image.fullExif = fullExif;
+        }
+      } catch (exifError) {
+        console.warn('Failed to extract full EXIF:', exifError.message);
+        image.fullExif = null;
+      }
+    }
+
+    res.json({ image });
   } catch (error) {
     console.error('Get image error:', error);
     res.status(500).json({ error: 'Failed to fetch image' });
@@ -439,17 +462,39 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // 更新图片信息
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const { description, tags } = req.body;
+    const { description, tags, filename } = req.body;
     const imageId = req.params.id;
 
     // 验证图片所有权
     const [images] = await db.query(
-      'SELECT id FROM images WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+      'SELECT id, original_filename FROM images WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
       [imageId, req.user.id]
     );
 
     if (images.length === 0) {
       return res.status(404).json({ error: 'Image not found' });
+    }
+
+    // 更新文件名（如果提供）
+    if (filename !== undefined && filename !== null) {
+      // 修复文件名编码
+      const newFilename = fixFilename(filename);
+      
+      // 验证文件名（不能为空，不能包含特殊字符）
+      if (!newFilename || newFilename.trim() === '') {
+        return res.status(400).json({ error: 'Filename cannot be empty' });
+      }
+      
+      // 检查文件名中是否包含非法字符
+      const invalidChars = /[<>:"/\\|?*]/;
+      if (invalidChars.test(newFilename)) {
+        return res.status(400).json({ error: 'Filename contains invalid characters' });
+      }
+      
+      await db.query(
+        'UPDATE images SET original_filename = ? WHERE id = ?',
+        [newFilename, imageId]
+      );
     }
 
     // 更新描述

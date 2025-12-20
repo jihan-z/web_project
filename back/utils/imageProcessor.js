@@ -22,7 +22,7 @@ const generateThumbnail = async (imagePath, thumbnailPath, size = 300) => {
 };
 
 /**
- * 读取 EXIF 信息
+ * 读取 EXIF 信息（基础信息，用于上传时）
  */
 const extractExifData = async (imagePath) => {
   try {
@@ -74,6 +74,82 @@ const extractExifData = async (imagePath) => {
       gpsLatitude: null,
       gpsLongitude: null,
       cameraModel: null
+    };
+  }
+};
+
+/**
+ * 读取完整的 EXIF 信息（用于详情显示）
+ */
+const extractFullExifData = async (imagePath) => {
+  try {
+    const metadata = await sharp(imagePath).metadata();
+    const fullExifData = {
+      // 基础信息
+      width: metadata.width,
+      height: metadata.height,
+      format: metadata.format,
+      channels: metadata.channels,
+      density: metadata.density,
+      hasAlpha: metadata.hasAlpha,
+      hasProfile: metadata.hasProfile,
+      orientation: metadata.orientation,
+      space: metadata.space,
+      // EXIF 详细信息
+      exif: null
+    };
+
+    // 提取完整 EXIF 数据
+    try {
+      const exifr = require('exifr');
+      // 使用 parse 方法提取所有字段，不限制字段
+      const fullExif = await exifr.parse(imagePath, {
+        // 不限制字段，提取所有可用的 EXIF 数据
+        translateKeys: false,
+        translateValues: false,
+        reviveValues: true,
+        sanitize: true,
+        mergeOutput: false
+      });
+      
+      if (fullExif) {
+        fullExifData.exif = fullExif;
+        
+        // 提取常用字段到顶层（方便前端使用）
+        fullExifData.takenTime = fullExif.DateTimeOriginal || fullExif.DateTime || null;
+        fullExifData.cameraMake = fullExif.Make || null;
+        fullExifData.cameraModel = fullExif.Model || null;
+        fullExifData.lensModel = fullExif.LensModel || null;
+        fullExifData.exposureTime = fullExif.ExposureTime || null;
+        fullExifData.fNumber = fullExif.FNumber || null;
+        fullExifData.iso = fullExif.ISO || fullExif.ISOSpeedRatings || null;
+        fullExifData.focalLength = fullExif.FocalLength || null;
+        fullExifData.focalLength35mm = fullExif.FocalLengthIn35mmFilm || null;
+        fullExifData.gpsLatitude = fullExif.latitude || fullExif.GPSLatitude || null;
+        fullExifData.gpsLongitude = fullExif.longitude || fullExif.GPSLongitude || null;
+        fullExifData.gpsAltitude = fullExif.GPSAltitude || null;
+        fullExifData.gpsTimeStamp = fullExif.GPSTimeStamp || null;
+        fullExifData.gpsDateStamp = fullExif.GPSDateStamp || null;
+        fullExifData.imageWidth = fullExif.ImageWidth || fullExif.PixelXDimension || null;
+        fullExifData.imageHeight = fullExif.ImageLength || fullExif.PixelYDimension || null;
+        fullExifData.xResolution = fullExif.XResolution || null;
+        fullExifData.yResolution = fullExif.YResolution || null;
+        fullExifData.resolutionUnit = fullExif.ResolutionUnit || null;
+        fullExifData.software = fullExif.Software || null;
+        fullExifData.orientation = fullExif.Orientation || metadata.orientation || null;
+      }
+    } catch (err) {
+      console.warn('Failed to parse full EXIF:', err.message);
+    }
+
+    return fullExifData;
+  } catch (error) {
+    console.error('Error extracting full EXIF data:', error);
+    return {
+      width: metadata?.width || null,
+      height: metadata?.height || null,
+      format: metadata?.format || null,
+      exif: null
     };
   }
 };
@@ -147,6 +223,7 @@ const adjustImage = async (imagePath, outputPath, adjustments) => {
 module.exports = {
   generateThumbnail,
   extractExifData,
+  extractFullExifData,
   cropImage,
   adjustImage
 };

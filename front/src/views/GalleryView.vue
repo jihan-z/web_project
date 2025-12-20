@@ -110,6 +110,9 @@
                       {{ tag }}
                     </el-tag>
                   </div>
+                  <div class="image-description" v-if="image.description" :title="image.description">
+                    {{ truncateDescription(image.description) }}
+                  </div>
                 </div>
               </div>
             </div>
@@ -175,6 +178,12 @@ const formatDate = (dateString) => {
   if (!dateString) return '';
   const date = new Date(dateString);
   return date.toLocaleDateString('zh-CN');
+};
+
+const truncateDescription = (description) => {
+  if (!description) return '';
+  if (description.length <= 50) return description;
+  return description.substring(0, 50) + '...';
 };
 
 const loadImages = async () => {
@@ -363,6 +372,19 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+.image-description {
+  font-size: 12px;
+  color: #666;
+  line-height: 1.4;
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-all;
 }
 
 .pagination-wrapper {

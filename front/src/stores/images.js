@@ -83,8 +83,9 @@ export const useImagesStore = defineStore('images', {
     },
 
     // 获取图片详情
-    async fetchImageDetail(id) {
-      const response = await request.get(`/images/${id}`);
+    async fetchImageDetail(id, includeExif = false) {
+      const params = includeExif ? { includeExif: 'true' } : {};
+      const response = await request.get(`/images/${id}`, { params });
       this.currentImage = response.image;
       return response.image;
     },
