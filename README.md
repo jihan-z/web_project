@@ -37,40 +37,40 @@
 
 1. **克隆项目**
 
-\`\`\`bash
+```bash
 git clone <repository-url>
 cd BS
-\`\`\`
+```
 
 2. **配置环境变量**
 
-\`\`\`bash
+```bash
 # Windows PowerShell
 Copy-Item env.example .env
 
 # Linux/Mac
 cp env.example .env
-\`\`\`
+```
 
 编辑 `.env` 文件，修改数据库密码和 JWT 密钥（生产环境必须修改）：
 
-\`\`\`env
+```env
 DB_PASSWORD=your_secure_password
 DB_ROOT_PASSWORD=your_secure_password
 JWT_SECRET=your_random_secret_key
-\`\`\`
+```
 
 3. **启动所有服务**
 
-\`\`\`bash
+```bash
 docker-compose up -d --build
-\`\`\`
+```
 
 4. **查看服务状态**
 
-\`\`\`bash
+```bash
 docker-compose ps
-\`\`\`
+```
 
 5. **访问应用**
 
@@ -80,7 +80,7 @@ docker-compose ps
 
 #### Docker 常用命令
 
-\`\`\`bash
+```bash
 # 查看日志
 docker-compose logs -f
 
@@ -95,7 +95,7 @@ docker-compose down
 
 # 停止并删除容器和数据卷（谨慎操作）
 docker-compose down -v
-\`\`\`
+```
 
 #### 故障排查
 
@@ -103,10 +103,10 @@ docker-compose down -v
 
 如果容器启动失败，查看日志：
 
-\`\`\`bash
+```bash
 docker-compose logs [服务名]
 # 例如：docker-compose logs mysql
-\`\`\`
+```
 
 ---
 
@@ -124,30 +124,30 @@ docker-compose logs [服务名]
 
 1. **克隆项目**
 
-\`\`\`bash
+```bash
 git clone <repository-url>
 cd BS
-\`\`\`
+```
 
 2. **数据库配置**
 
 创建 MySQL 数据库并执行初始化脚本：
 
-\`\`\`bash
+```bash
 mysql -u root -p < mysql/init.sql
-\`\`\`
+```
 
 或手动创建数据库：
 
-\`\`\`sql
+```sql
 CREATE DATABASE image_manager CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-\`\`\`
+```
 
 然后运行 `mysql/init.sql` 中的表结构创建语句。
 
 3. **后端设置**
 
-\`\`\`bash
+```bash
 cd back
 npm install
 
@@ -163,13 +163,13 @@ npm install
 
 # 启动后端服务
 npm start
-\`\`\`
+```
 
 后端将在 http://localhost:3000 运行
 
 4. **前端设置**
 
-\`\`\`bash
+```bash
 cd front
 npm install
 
@@ -179,7 +179,7 @@ npm install
 
 # 启动开发服务器
 npm run dev
-\`\`\`
+```
 
 前端将在 http://localhost:5173 运行
 
@@ -187,19 +187,19 @@ npm run dev
 
 **前端构建**
 
-\`\`\`bash
+```bash
 cd front
 npm run build
-\`\`\`
+```
 
 构建产物在 `front/dist` 目录。
 
 **后端生产模式**
 
-\`\`\`bash
+```bash
 cd back
 NODE_ENV=production npm start
-\`\`\`
+```
 
 ---
 
@@ -259,52 +259,77 @@ NODE_ENV=production npm start
 
 ## 项目结构
 
-\`\`\`
+```
 BS/
-├── back/                    # 后端项目
-│   ├── config/             # 配置文件
-│   │   ├── database.js     # 数据库连接
-│   │   └── init.sql        # 数据库初始化脚本
-│   ├── middleware/         # 中间件
-│   │   ├── auth.js         # JWT 认证
-│   │   └── upload.js       # 文件上传配置
-│   ├── routes/             # 路由
-│   │   ├── auth.js         # 用户认证接口
-│   │   ├── images.js       # 图片管理接口
-│   │   └── tags.js         # 标签管理接口
-│   ├── utils/              # 工具函数
-│   │   └── imageProcessor.js  # 图片处理
-│   ├── uploads/            # 图片存储目录
-│   ├── app.js              # Express 应用
-│   ├── package.json
-│   └── bin/www             # 启动脚本
+├── back/                          # 后端项目
+│   ├── config/                    # 配置文件
+│   │   ├── database.js            # 数据库连接配置
+│   │   └── init.sql               # 数据库初始化脚本（已废弃，使用 mysql/init.sql）
+│   ├── middleware/                # 中间件
+│   │   ├── auth.js                # JWT 认证中间件
+│   │   └── upload.js              # 文件上传配置
+│   ├── routes/                    # 路由
+│   │   ├── auth.js                # 用户认证接口
+│   │   ├── images.js              # 图片管理接口
+│   │   └── tags.js                # 标签管理接口
+│   ├── utils/                     # 工具函数
+│   │   └── imageProcessor.js      # 图片处理工具
+│   ├── uploads/                   # 图片存储目录
+│   ├── app.js                     # Express 应用主文件
+│   ├── package.json               # 后端依赖配置
+│   ├── Dockerfile                 # 后端 Docker 镜像配置
+│   ├── .dockerignore              # Docker 构建忽略文件
+│   └── bin/
+│       └── www                    # 启动脚本
 │
-├── front/                   # 前端项目
+├── front/                         # 前端项目
 │   ├── src/
-│   │   ├── assets/         # 静态资源
-│   │   ├── components/     # 公共组件
-│   │   │   └── LayoutHeader.vue
-│   │   ├── stores/         # Pinia 状态管理
-│   │   │   ├── user.js     # 用户状态
-│   │   │   ├── images.js   # 图片状态
-│   │   │   └── tags.js     # 标签状态
-│   │   ├── utils/          # 工具函数
-│   │   │   └── request.js  # Axios 封装
-│   │   ├── views/          # 页面组件
-│   │   │   ├── LoginView.vue
-│   │   │   ├── RegisterView.vue
-│   │   │   ├── HomeView.vue
-│   │   │   ├── GalleryView.vue
-│   │   │   ├── UploadView.vue
-│   │   │   └── ImageDetailView.vue
-│   │   ├── router/         # 路由配置
-│   │   ├── App.vue
-│   │   └── main.js
-│   ├── package.json
-│   └── vite.config.js
+│   │   ├── assets/                # 静态资源
+│   │   ├── components/            # 公共组件
+│   │   │   ├── MainLayout.vue     # 主布局组件
+│   │   │   ├── ImageList.vue      # 图片列表组件
+│   │   │   ├── ImageUploader.vue  # 图片上传组件
+│   │   │   ├── ImageDetail.vue    # 图片详情组件
+│   │   │   ├── ImageCarousel.vue  # 图片轮播组件
+│   │   │   ├── CropperTool.vue    # 图片裁剪工具
+│   │   │   └── TagSelector.vue    # 标签选择器
+│   │   ├── stores/                # Pinia 状态管理
+│   │   │   ├── user.js            # 用户状态
+│   │   │   ├── images.js          # 图片状态
+│   │   │   ├── tags.js            # 标签状态
+│   │   │   └── image.js           # 单个图片状态
+│   │   ├── utils/                 # 工具函数
+│   │   │   ├── api.js             # API 请求封装
+│   │   │   └── request.js         # Axios 封装
+│   │   ├── views/                 # 页面组件
+│   │   │   ├── LoginView.vue      # 登录页
+│   │   │   ├── RegisterView.vue   # 注册页
+│   │   │   ├── HomeView.vue       # 首页
+│   │   │   ├── GalleryView.vue    # 相册页
+│   │   │   ├── UploadView.vue     # 上传页
+│   │   │   ├── ImageDetailView.vue # 图片详情页
+│   │   │   └── ImageEditView.vue  # 图片编辑页
+│   │   ├── router/                # 路由配置
+│   │   │   └── index.js           # 路由定义
+│   │   ├── App.vue                # 根组件
+│   │   └── main.js                # 入口文件
+│   ├── public/                    # 公共静态资源
+│   ├── package.json               # 前端依赖配置
+│   ├── vite.config.js             # Vite 构建配置
+│   ├── Dockerfile                 # 前端 Docker 镜像配置
+│   ├── nginx.conf                 # Nginx 配置文件
+│   └── .dockerignore              # Docker 构建忽略文件
 │
-└── README.md               # 项目说明
-\`\`\`
+├── mysql/                         # 数据库脚本
+│   ├── init.sql                   # 数据库初始化脚本
+│   └── fix_chinese_encoding.sql   # 中文编码修复脚本
+│
+├── docker-compose.yml             # Docker Compose 编排文件
+├── .dockerignore                  # 根目录 Docker 忽略文件
+├── .gitignore                     # Git 忽略文件
+├── env.example                    # 环境变量示例文件
+└── README.md                      # 项目说明文档
+```
 
 ## API 接口文档
 
@@ -389,11 +414,3 @@ BS/
 ### 3. 前端无法连接后端
 
 检查后端服务是否启动，CORS 配置是否正确。
-
-## 许可证
-
-MIT License
-
-## 联系方式
-
-如有问题或建议，请提交 Issue。
