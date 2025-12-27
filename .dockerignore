@@ -1,0 +1,57 @@
+# Node modules
+node_modules
+npm-debug.log
+yarn-error.log
+
+# 构建产物
+dist
+build
+.next
+out
+
+# 环境变量文件
+.env
+.env.local
+.env.*.local
+
+# IDE 文件
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# 文档
+*.md
+*.pdf
+*.docx
+
+# 测试文件
+test
+tests
+*.test.js
+*.spec.js
+
+# 日志
+logs
+*.log
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# 临时文件
+tmp
+temp
+*.tmp
+

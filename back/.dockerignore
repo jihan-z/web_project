@@ -1,0 +1,33 @@
+# Node modules
+node_modules
+npm-debug.log
+
+# 环境变量文件
+.env
+.env.local
+
+# 日志
+logs
+*.log
+
+# IDE 文件
+.vscode
+.idea
+
+# Git
+.git
+.gitignore
+
+# 文档
+*.md
+*.pdf
+*.docx
+
+# 测试文件
+test
+*.test.js
+
+# 临时文件
+tmp
+temp
+
