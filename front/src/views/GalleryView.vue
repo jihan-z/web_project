@@ -4,7 +4,7 @@
       <!-- 搜索和筛选 -->
       <el-card class="filter-card">
         <el-row :gutter="16">
-          <el-col :span="8">
+          <el-col :xs="24" :sm="24" :md="8">
             <el-input
               v-model="filters.keyword"
               placeholder="搜索图片..."
@@ -17,7 +17,7 @@
             </el-input>
           </el-col>
 
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-select
               v-model="filters.tags"
               multiple
@@ -36,7 +36,7 @@
             </el-select>
           </el-col>
 
-          <el-col :span="8">
+          <el-col :xs="24" :sm="12" :md="8">
             <el-date-picker
               v-model="dateRange"
               type="daterange"
@@ -50,11 +50,12 @@
         </el-row>
 
         <div class="filter-actions">
-          <el-button @click="handleReset">重置</el-button>
+          <el-button @click="handleReset" size="default">重置</el-button>
           <el-button
             v-if="selectedImages.length > 0"
             type="danger"
             @click="handleBatchDelete"
+            size="default"
           >
             删除选中 ({{ selectedImages.length }})
           </el-button>
@@ -124,7 +125,7 @@
                 v-model:page-size="pagination.limit"
                 :total="pagination.total"
                 :page-sizes="[12, 24, 48, 96]"
-                layout="total, sizes, prev, pager, next, jumper"
+                :layout="isMobile ? 'prev, pager, next' : 'total, sizes, prev, pager, next, jumper'"
                 @current-change="handlePageChange"
                 @size-change="handleSizeChange"
               />
@@ -137,12 +138,27 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, onMounted, computed, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import MainLayout from '@/components/MainLayout.vue';
 import { useImagesStore } from '@/stores/images';
 import { useTagsStore } from '@/stores/tags';
+
+const isMobile = ref(false);
+
+const checkMobile = () => {
+  isMobile.value = window.innerWidth < 768;
+};
+
+onMounted(() => {
+  checkMobile();
+  window.addEventListener('resize', checkMobile);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', checkMobile);
+});
 
 const router = useRouter();
 const imagesStore = useImagesStore();
@@ -284,6 +300,42 @@ onMounted(() => {
   gap: 10px;
   margin-top: 16px;
   justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .filter-card {
+    margin-bottom: 16px;
+  }
+
+  .filter-actions {
+    justify-content: stretch;
+  }
+
+  .filter-actions .el-button {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .image-card {
+    border-width: 1px;
+  }
+
+  .image-info {
+    padding: 8px;
+  }
+
+  .image-name {
+    font-size: 12px;
+  }
+
+  .image-meta {
+    font-size: 11px;
+  }
+
+  .pagination-wrapper {
+    padding: 16px 0;
+  }
 }
 
 .images-card {
@@ -300,6 +352,19 @@ onMounted(() => {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 20px;
   margin-bottom: 24px;
+}
+
+@media (max-width: 768px) {
+  .image-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .image-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
 .image-card {

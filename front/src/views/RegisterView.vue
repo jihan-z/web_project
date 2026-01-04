@@ -175,6 +175,32 @@ const handleRegister = async () => {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
   padding: 40px;
   width: 420px;
+  max-width: 90%;
+}
+
+@media (max-width: 768px) {
+  .register-container {
+    padding: 20px;
+  }
+
+  .register-box {
+    padding: 30px 20px;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .register-header h1 {
+    font-size: 24px;
+  }
+
+  .register-header p {
+    font-size: 13px;
+  }
+
+  .register-button {
+    min-height: 44px;
+    font-size: 16px;
+  }
 }
 
 .register-header {

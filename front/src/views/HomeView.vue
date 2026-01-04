@@ -3,7 +3,7 @@
     <div class="home-page">
       <!-- 统计卡片 -->
       <el-row :gutter="20" class="stats-row">
-        <el-col :span="8">
+        <el-col :xs="24" :sm="12" :md="8">
           <el-card class="stat-card">
             <div class="stat-content">
               <el-icon :size="48" color="#409eff"><Picture /></el-icon>
@@ -15,7 +15,7 @@
           </el-card>
         </el-col>
 
-        <el-col :span="8">
+        <el-col :xs="24" :sm="12" :md="8">
           <el-card class="stat-card">
             <div class="stat-content">
               <el-icon :size="48" color="#67c23a"><CollectionTag /></el-icon>
@@ -27,7 +27,7 @@
           </el-card>
         </el-col>
 
-        <el-col :span="8">
+        <el-col :xs="24" :sm="12" :md="8">
           <el-card class="stat-card">
             <div class="stat-content">
               <el-icon :size="48" color="#e6a23c"><Calendar /></el-icon>
@@ -46,11 +46,11 @@
           <span>快速操作</span>
         </template>
         <div class="action-buttons">
-          <el-button type="primary" size="large" @click="router.push('/upload')">
+          <el-button type="primary" size="large" @click="router.push('/upload')" class="action-btn">
             <el-icon><Upload /></el-icon>
             <span>上传图片</span>
           </el-button>
-          <el-button size="large" @click="router.push('/gallery')">
+          <el-button size="large" @click="router.push('/gallery')" class="action-btn">
             <el-icon><Picture /></el-icon>
             <span>浏览相册</span>
           </el-button>
@@ -188,6 +188,34 @@ onMounted(async () => {
 .action-buttons {
   display: flex;
   gap: 16px;
+  flex-wrap: wrap;
+}
+
+.action-btn {
+  flex: 1;
+  min-width: 120px;
+}
+
+@media (max-width: 768px) {
+  .action-buttons {
+    flex-direction: column;
+  }
+
+  .action-btn {
+    width: 100%;
+  }
+
+  .stat-content {
+    gap: 12px;
+  }
+
+  .stat-value {
+    font-size: 24px;
+  }
+
+  .stat-label {
+    font-size: 12px;
+  }
 }
 
 .carousel-card {
@@ -204,6 +232,19 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   gap: 16px;
+}
+
+@media (max-width: 768px) {
+  .image-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .image-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
 }
 
 .image-item {

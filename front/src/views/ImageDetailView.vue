@@ -10,7 +10,7 @@
 
           <el-row :gutter="24">
             <!-- 图片展示区 -->
-            <el-col :span="16">
+            <el-col :xs="24" :sm="24" :md="16">
               <el-card>
                 <div class="image-viewer">
                   <img
@@ -21,14 +21,17 @@
                 </div>
 
                 <div class="image-actions">
-                  <el-button @click="showCropDialog">
-                    <el-icon><Crop /></el-icon>
-                    裁剪
-                  </el-button>
-                  <el-button @click="showAdjustDialog">
-                    <el-icon><Edit /></el-icon>
-                    调整色调
-                  </el-button>
+                  <!-- 桌面端显示裁剪和调整色调按钮 -->
+                  <template v-if="!isMobile">
+                    <el-button @click="showCropDialog">
+                      <el-icon><Crop /></el-icon>
+                      裁剪
+                    </el-button>
+                    <el-button @click="showAdjustDialog">
+                      <el-icon><Edit /></el-icon>
+                      调整色调
+                    </el-button>
+                  </template>
                   <el-button type="danger" @click="handleDelete">
                     <el-icon><Delete /></el-icon>
                     删除
@@ -38,7 +41,7 @@
             </el-col>
 
             <!-- 信息和编辑区 -->
-            <el-col :span="8">
+            <el-col :xs="24" :sm="24" :md="8">
               <el-card>
                 <template #header>
                   <div class="card-header">
@@ -323,6 +326,23 @@
                     </div>
                   </el-form-item>
 
+                  <!-- 移动端显示裁剪和调整色调按钮 -->
+                  <template v-if="isMobile">
+                    <el-divider />
+                    <el-form-item label="图片编辑">
+                      <div class="mobile-edit-actions">
+                        <el-button @click="showCropDialog" style="width: 100%; margin-bottom: 8px">
+                          <el-icon><Crop /></el-icon>
+                          裁剪图片
+                        </el-button>
+                        <el-button @click="showAdjustDialog" style="width: 100%">
+                          <el-icon><Edit /></el-icon>
+                          调整色调
+                        </el-button>
+                      </div>
+                    </el-form-item>
+                  </template>
+
                   <el-button type="primary" @click="handleUpdate" :loading="updating" style="width: 100%">
                     保存修改
                   </el-button>
@@ -334,7 +354,7 @@
       </el-skeleton>
 
       <!-- 裁剪对话框 -->
-      <el-dialog v-model="cropDialogVisible" title="裁剪图片" width="800px">
+      <el-dialog v-model="cropDialogVisible" title="裁剪图片" :width="isMobile ? '95%' : '800px'">
         <div class="crop-container">
           <img ref="cropImageRef" :src="getImageUrl(image?.stored_path)" style="max-width: 100%" />
         </div>
@@ -345,7 +365,7 @@
       </el-dialog>
 
       <!-- 色调调整对话框 -->
-      <el-dialog v-model="adjustDialogVisible" title="调整色调" width="600px">
+      <el-dialog v-model="adjustDialogVisible" title="调整色调" :width="isMobile ? '95%' : '600px'">
         <el-form label-width="100px">
           <el-form-item label="亮度">
             <el-slider v-model="adjustments.brightness" :min="-50" :max="50" :step="1" />
@@ -386,6 +406,12 @@ const route = useRoute();
 const router = useRouter();
 const imagesStore = useImagesStore();
 const tagsStore = useTagsStore();
+
+const isMobile = ref(false);
+
+const checkMobile = () => {
+  isMobile.value = window.innerWidth < 768;
+};
 
 const loading = ref(false);
 const updating = ref(false);
@@ -785,10 +811,13 @@ const handleDelete = () => {
 };
 
 onMounted(() => {
+  checkMobile();
+  window.addEventListener('resize', checkMobile);
   loadImage();
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', checkMobile);
   if (cropper) {
     cropper.destroy();
     cropper = null;
@@ -827,6 +856,48 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: center;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .detail-page {
+    padding: 0;
+  }
+
+  .back-button {
+    margin-bottom: 12px;
+  }
+
+  .image-viewer {
+    min-height: 300px;
+  }
+
+  .image-viewer img {
+    max-height: 400px;
+  }
+
+  .image-actions {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .image-actions .el-button {
+    width: 100%;
+  }
+
+  .card-header {
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .card-header .el-button {
+    width: 100%;
+  }
+
+  .mobile-edit-actions {
+    width: 100%;
+  }
 }
 
 .info-value {

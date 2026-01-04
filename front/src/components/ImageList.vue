@@ -76,6 +76,29 @@ export default {
   gap: 20px;
 }
 
+@media (max-width: 768px) {
+  .image-list {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .image-card {
+    border-radius: 6px;
+  }
+
+  .image-preview {
+    height: 150px;
+  }
+
+  .image-info {
+    padding: 12px;
+  }
+
+  .image-info h3 {
+    font-size: 14px;
+  }
+}
+
 .image-card {
   border: 1px solid #ebeef5;
   border-radius: 8px;

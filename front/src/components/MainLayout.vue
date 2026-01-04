@@ -1,10 +1,10 @@
 <template>
   <el-container class="main-layout">
-    <!-- 左侧导航栏 -->
-    <el-aside width="200px" class="sidebar">
+    <!-- 左侧导航栏（桌面端） -->
+    <el-aside width="200px" class="sidebar" :class="{ 'sidebar-mobile-hidden': isMobile && !sidebarVisible }">
       <div class="logo">
         <el-icon :size="32"><Picture /></el-icon>
-        <span>图片管理</span>
+        <span class="logo-text">图片管理</span>
       </div>
 
       <el-menu
@@ -40,28 +40,90 @@
       </div>
     </el-aside>
 
+    <!-- 移动端遮罩层 -->
+    <div 
+      v-if="isMobile && sidebarVisible" 
+      class="sidebar-overlay"
+      @click="sidebarVisible = false"
+    ></div>
+
     <!-- 右侧主内容区 -->
     <el-container class="main-content">
       <el-header class="content-header">
-        <div class="header-title">{{ pageTitle }}</div>
+        <div class="header-left">
+          <el-button 
+            v-if="isMobile" 
+            class="mobile-menu-btn"
+            @click="sidebarVisible = !sidebarVisible"
+            text
+          >
+            <el-icon :size="24"><Menu /></el-icon>
+          </el-button>
+          <div class="header-title">{{ pageTitle }}</div>
+        </div>
+        <div class="header-right">
+          <div v-if="isMobile" class="mobile-user-info">
+            <el-icon><User /></el-icon>
+            <span>{{ userStore.userInfo?.username || '用户' }}</span>
+          </div>
+        </div>
       </el-header>
 
       <el-main class="content-main">
         <slot></slot>
       </el-main>
     </el-container>
+
+    <!-- 移动端底部导航栏 -->
+    <div v-if="isMobile" class="mobile-bottom-nav">
+      <div 
+        class="nav-item"
+        :class="{ active: activeMenu === '/' }"
+        @click="handleMenuSelect('/')"
+      >
+        <el-icon><HomeFilled /></el-icon>
+        <span>首页</span>
+      </div>
+      <div 
+        class="nav-item"
+        :class="{ active: activeMenu === '/gallery' }"
+        @click="handleMenuSelect('/gallery')"
+      >
+        <el-icon><Picture /></el-icon>
+        <span>相册</span>
+      </div>
+      <div 
+        class="nav-item"
+        :class="{ active: activeMenu === '/upload' }"
+        @click="handleMenuSelect('/upload')"
+      >
+        <el-icon><Upload /></el-icon>
+        <span>上传</span>
+      </div>
+    </div>
   </el-container>
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessageBox } from 'element-plus';
 import { useUserStore } from '@/stores/user';
+import { 
+  Menu, 
+  Picture, 
+  HomeFilled, 
+  Upload, 
+  User, 
+  SwitchButton 
+} from '@element-plus/icons-vue';
 
 const route = useRoute();
 const router = useRouter();
 const userStore = useUserStore();
+
+const sidebarVisible = ref(false);
+const isMobile = ref(false);
 
 const activeMenu = computed(() => route.path);
 
@@ -81,8 +143,18 @@ const pageTitle = computed(() => {
   return '图片管理系统';
 });
 
+const checkMobile = () => {
+  isMobile.value = window.innerWidth < 768;
+  if (!isMobile.value) {
+    sidebarVisible.value = false;
+  }
+};
+
 const handleMenuSelect = (index) => {
   router.push(index);
+  if (isMobile.value) {
+    sidebarVisible.value = false;
+  }
 };
 
 const handleLogout = () => {
@@ -95,12 +167,22 @@ const handleLogout = () => {
     router.push('/login');
   });
 };
+
+onMounted(() => {
+  checkMobile();
+  window.addEventListener('resize', checkMobile);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', checkMobile);
+});
 </script>
 
 <style scoped>
 .main-layout {
   height: 100vh;
   width: 100vw;
+  position: relative;
 }
 
 .sidebar {
@@ -109,6 +191,8 @@ const handleLogout = () => {
   display: flex;
   flex-direction: column;
   box-shadow: 2px 0 6px rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s ease;
+  z-index: 1000;
 }
 
 .logo {
@@ -120,6 +204,10 @@ const handleLogout = () => {
   font-size: 18px;
   font-weight: 600;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.logo-text {
+  display: inline;
 }
 
 .sidebar-menu {
@@ -161,6 +249,7 @@ const handleLogout = () => {
 
 .main-content {
   background: #f0f2f5;
+  transition: margin-left 0.3s ease;
 }
 
 .content-header {
@@ -168,8 +257,23 @@ const handleLogout = () => {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
   display: flex;
   align-items: center;
-  padding: 0 24px;
+  justify-content: space-between;
+  padding: 0 16px;
   height: 60px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mobile-menu-btn {
+  padding: 8px;
+  min-height: auto;
 }
 
 .header-title {
@@ -178,9 +282,140 @@ const handleLogout = () => {
   color: #333;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+}
+
+.mobile-user-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: #666;
+}
+
 .content-main {
   padding: 24px;
   overflow-y: auto;
+  padding-bottom: 80px; /* 为移动端底部导航栏留出空间 */
+}
+
+/* 移动端遮罩层 */
+.sidebar-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+}
+
+/* 移动端底部导航栏 */
+.mobile-bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: #fff;
+  border-top: 1px solid #e4e7ed;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 1000;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.mobile-bottom-nav .nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 1;
+  height: 100%;
+  cursor: pointer;
+  transition: all 0.3s;
+  color: #909399;
+  font-size: 12px;
+  padding: 8px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-bottom-nav .nav-item.active {
+  color: #409eff;
+}
+
+.mobile-bottom-nav .nav-item .el-icon {
+  font-size: 22px;
+}
+
+.mobile-bottom-nav .nav-item span {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 移动端响应式 */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: 200px;
+    transform: translateX(-100%);
+  }
+
+  .sidebar:not(.sidebar-mobile-hidden) {
+    transform: translateX(0);
+  }
+
+  .main-content {
+    margin-left: 0 !important;
+    width: 100%;
+  }
+
+  .content-header {
+    padding: 0 12px;
+    height: 56px;
+  }
+
+  .header-title {
+    font-size: 18px;
+  }
+
+  .content-main {
+    padding: 16px;
+    padding-bottom: 80px;
+  }
+
+  .logo-text {
+    display: none;
+  }
+
+  .logo {
+    padding: 16px;
+  }
+}
+
+@media (min-width: 769px) {
+  .mobile-bottom-nav {
+    display: none;
+  }
+
+  .sidebar-overlay {
+    display: none;
+  }
+
+  .mobile-menu-btn {
+    display: none;
+  }
+
+  .mobile-user-info {
+    display: none;
+  }
 }
 </style>
 

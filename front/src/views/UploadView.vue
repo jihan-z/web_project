@@ -189,6 +189,12 @@ const getImageUrl = (path) => {
   align-items: center;
 }
 
+@media (max-width: 768px) {
+  :deep(.el-upload-dragger) {
+    height: 200px;
+  }
+}
+
 .upload-icon {
   font-size: 60px;
   color: #999;
@@ -219,6 +225,50 @@ const getImageUrl = (path) => {
   justify-content: center;
   gap: 20px;
   margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .upload-page {
+    padding: 0;
+  }
+
+  .upload-actions {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .upload-actions .el-button {
+    width: 100%;
+  }
+
+  .upload-icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+  }
+
+  .upload-text {
+    font-size: 14px;
+  }
+
+  .upload-tip {
+    font-size: 12px;
+  }
+
+  .uploaded-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .card-header {
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .card-header .el-button {
+    width: 100%;
+  }
 }
 
 .uploaded-card {
